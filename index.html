@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Träningstider – schemaläggning</title>
+<style>
+  :root{
+    --bg:#f4f6f8; --panel:#ffffff; --ink:#1f2933; --muted:#62727b;
+    --line:#d8dee4; --accent:#2563eb; --ok:#1b873f; --warn:#c77700; --bad:#c62828;
+    --rowH:26px; --headH:32px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--ink);font-size:14px;}
+  header{position:sticky;top:0;z-index:50;background:var(--panel);border-bottom:1px solid var(--line);
+    padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  header h1{font-size:17px;margin:0;font-weight:700;}
+  header .sub{color:var(--muted);font-size:12px;}
+  .cloud{font-weight:600;}
+  .cloud.ok{color:var(--ok);} .cloud.busy{color:var(--warn);} .cloud.bad{color:var(--bad);} .cloud.idle{color:var(--muted);}
+  .toolbar{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;}
+  button.tool{background:#fff;border:1px solid var(--line);border-radius:7px;padding:6px 11px;
+    font-size:13px;cursor:pointer;color:var(--ink);}
+  button.tool:hover{background:#f0f3f7;border-color:#bcc6cf;}
+  button.tool.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  button.tool.primary:hover{background:#1d4fd1;}
+  button.tool.danger:hover{background:#fdecec;border-color:#e2a4a4;color:var(--bad);}
+  button.tool:disabled{opacity:.4;cursor:default;}
+  button.tool:disabled:hover{background:#fff;border-color:var(--line);}
+
+  /* Palette */
+  .palette{position:sticky;top:53px;z-index:40;background:var(--panel);border-bottom:1px solid var(--line);
+    padding:9px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .palette .ptitle{font-size:12px;color:var(--muted);margin-right:4px;font-weight:600;}
+  .chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:#fff;
+    border-radius:999px;padding:3px 4px 3px 4px;cursor:grab;user-select:none;}
+  .chip:active{cursor:grabbing;}
+  .chip .sw{width:18px;height:18px;border-radius:50%;flex:none;}
+  .chip .nm{font-weight:600;font-size:13px;padding-left:1px;}
+  .chip .cnt{font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;color:#fff;}
+  .chip.blocked{border-style:dashed;}
+  .cnt.ok{background:var(--ok);} .cnt.under{background:var(--warn);} .cnt.over{background:var(--bad);}
+
+  /* Layout */
+  .wrap{display:flex;gap:16px;align-items:flex-start;padding:16px;}
+  .schedule{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:16px;}
+  .side{flex:0 0 290px;position:sticky;top:108px;}
+
+  .banner{background:#fff7e6;border:1px solid #f0d399;color:#7a5b00;border-radius:9px;
+    padding:9px 12px;font-size:13px;display:flex;gap:10px;align-items:center;}
+  .banner button{margin-left:auto;border:none;background:transparent;cursor:pointer;color:#7a5b00;font-size:16px;}
+
+  .summary{display:flex;gap:10px;flex-wrap:wrap;}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 12px;min-width:96px;}
+  .stat .v{font-size:20px;font-weight:700;line-height:1;}
+  .stat .l{font-size:11px;color:var(--muted);margin-top:3px;}
+  .stat.alert .v{color:var(--bad);}
+
+  .day{background:var(--panel);border:1px solid var(--line);border-radius:11px;overflow:hidden;}
+  .day h2{margin:0;padding:9px 14px;font-size:14px;letter-spacing:.04em;text-transform:uppercase;
+    background:#eef2f6;border-bottom:1px solid var(--line);}
+  .gridscroll{overflow-x:auto;}
+  .grid{display:grid;position:relative;min-width:max-content;}
+  .ghead,.tlabel,.cell{border-right:1px solid var(--line);border-bottom:1px solid var(--line);}
+  .ghead{background:#f7f9fb;font-weight:700;font-size:12px;display:flex;align-items:center;
+    justify-content:center;height:var(--headH);text-align:center;padding:0 6px;}
+  .corner{height:var(--headH);background:#f7f9fb;border-right:1px solid var(--line);border-bottom:1px solid var(--line);}
+  .tlabel{font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:center;
+    height:var(--rowH);background:#fafbfc;white-space:nowrap;padding:0 6px;}
+  .cell{height:var(--rowH);}
+  .cell.over{outline:2px dashed var(--accent);outline-offset:-2px;background:#e8f0fe;}
+  .emptyhall{padding:16px 14px;color:var(--muted);font-size:13px;}
+  .cattabs{display:flex;gap:6px;flex-wrap:wrap;}
+  .cattabs:empty{display:none;}
+  .ctab{background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 13px;font-size:13px;
+    font-weight:600;cursor:pointer;color:var(--muted);}
+  .ctab:hover{background:#f0f3f7;}
+  .ctab.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .catchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;
+    padding:4px 5px 4px 12px;font-size:13px;background:#fafbfc;font-weight:600;}
+  .catchip button{border:none;background:rgba(0,0,0,.12);color:#333;border-radius:50%;width:18px;height:18px;
+    cursor:pointer;font-size:11px;line-height:18px;padding:0;}
+
+  .booking{position:relative;margin:1px;border-radius:6px;z-index:2;cursor:grab;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.08);user-select:none;text-align:center;line-height:1.05;}
+  .booking:active{cursor:grabbing;}
+  .booking.blocked{background:repeating-linear-gradient(45deg,#9aa3ab,#9aa3ab 7px,#8a939b 7px,#8a939b 14px);
+    color:#fff;font-weight:600;font-size:11px;}
+  .booking.clash{box-shadow:0 0 0 2px var(--bad),inset 0 0 0 1px rgba(0,0,0,.08);}
+  .booking .x{position:absolute;top:1px;right:2px;width:15px;height:15px;border-radius:50%;
+    background:rgba(0,0,0,.28);color:#fff;font-size:11px;line-height:15px;text-align:center;
+    cursor:pointer;opacity:0;transition:opacity .1s;}
+  .booking:hover .x{opacity:1;}
+  .booking .rs{position:absolute;left:0;right:0;bottom:0;height:7px;cursor:ns-resize;}
+  .booking .rs::after{content:"";position:absolute;left:50%;bottom:2px;transform:translateX(-50%);
+    width:18px;height:2px;border-top:2px double rgba(0,0,0,.25);}
+  .booking .t{font-size:9.5px;font-weight:600;opacity:.8;display:block;}
+
+  /* Side panel */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;overflow:hidden;}
+  .card h3{margin:0;padding:9px 12px;font-size:13px;background:#eef2f6;border-bottom:1px solid var(--line);}
+  .balrow{display:grid;grid-template-columns:14px 1fr auto auto;gap:8px;align-items:center;
+    padding:6px 10px;border-bottom:1px solid #eef1f4;}
+  .balrow:last-child{border-bottom:none;}
+  .balrow .sw{width:13px;height:13px;border-radius:3px;}
+  .balrow .nm{font-weight:600;font-size:13px;}
+  .balrow .sched{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted);}
+  .balrow input.tgt{width:38px;text-align:center;border:1px solid var(--line);border-radius:6px;
+    padding:3px;font-size:13px;}
+  .balrow .diff{font-weight:700;font-size:12px;border-radius:999px;padding:2px 8px;color:#fff;text-align:center;min-width:34px;}
+  .diff.ok{background:var(--ok);} .diff.under{background:var(--warn);} .diff.over{background:var(--bad);}
+  .legend{padding:10px 12px;font-size:12px;color:var(--muted);line-height:1.5;}
+
+  /* Modal: inställningar */
+  .modal-back{display:none;position:fixed;inset:0;background:rgba(15,23,32,.45);z-index:200;
+    padding:40px 16px;overflow:auto;justify-content:center;align-items:flex-start;}
+  .modal{background:#fff;border-radius:13px;max-width:780px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+  .modal-h{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--line);}
+  .modal-h b{font-size:16px;}
+  .modal-body{padding:16px 18px;}
+  .tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--line);}
+  .tab{background:transparent;border:none;border-bottom:2px solid transparent;padding:8px 14px;
+    font-size:14px;cursor:pointer;color:var(--muted);font-weight:600;margin-bottom:-1px;}
+  .tab:hover{color:var(--ink);}
+  .tab.on{color:var(--accent);border-bottom-color:var(--accent);}
+  .modal-body h4{margin:16px 0 8px;font-size:13px;}
+  .modal-body h4:first-child{margin-top:0;}
+  .hint{color:var(--muted);font-size:12px;margin:0 0 10px;}
+  .daytoggles{display:flex;gap:8px;flex-wrap:wrap;}
+  .dtog{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;
+    padding:6px 10px;font-size:13px;cursor:pointer;background:#fafbfc;}
+  .dtog.on{background:#e8f0fe;border-color:#9db8f0;color:#1b3a8a;font-weight:600;}
+  .mscroll{overflow-x:auto;}
+  .hallmatrix{border-collapse:collapse;width:100%;font-size:13px;}
+  .hallmatrix th,.hallmatrix td{border:1px solid var(--line);padding:5px 7px;}
+  .hallmatrix thead th{background:#f1f4f8;font-size:12px;white-space:nowrap;}
+  .hallmatrix input.hallname{width:100%;min-width:120px;border:1px solid transparent;border-radius:6px;
+    padding:5px 7px;font-size:13px;background:#fafbfc;}
+  .hallmatrix input.hallname:focus{border-color:var(--accent);background:#fff;outline:none;}
+  .hallmatrix input[type=checkbox]{width:17px;height:17px;cursor:pointer;}
+  .hallmatrix td.del{text-align:center;}
+  .hallmatrix .del button{padding:3px 8px;}
+  .hallmatrix input[type=color]{width:34px;height:26px;padding:0;border:1px solid var(--line);
+    border-radius:5px;background:#fff;cursor:pointer;}
+  .hallmatrix input.num{width:54px;text-align:center;border:1px solid var(--line);border-radius:6px;padding:5px;font-size:13px;}
+  .hallmatrix select{border:1px solid var(--line);border-radius:6px;padding:5px;font-size:13px;}
+  .addhall{display:flex;gap:8px;margin-top:12px;align-items:center;}
+  .addhall input[type=text],.addhall input:not([type]){flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;}
+  .addhall input[type=color]{width:42px;height:38px;flex:none;padding:2px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;}
+  .dzone{border:1px solid #e2a4a4;background:#fdf3f3;border-radius:9px;padding:11px 13px;margin-top:8px;}
+  .dzone h5{margin:0 0 3px;font-size:13px;color:var(--bad);}
+  .dzone p{margin:0;font-size:12px;color:var(--muted);}
+  .dzone .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;}
+  .dzone input{border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:13px;width:150px;}
+  .bklist{border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .bkrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #eef1f4;font-size:12.5px;}
+  .bkrow:last-child{border-bottom:none;}
+
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1f2933;color:#fff;
+    padding:9px 16px;border-radius:8px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:300;}
+  .toast.show{opacity:1;}
+
+  .printonly{display:none;}
+  .printhead h2{margin:0;font-size:20px;}
+  .printhead .pd{font-size:12px;color:#444;margin-top:3px;}
+  /* Utskriftsvy: hela veckan i ETT rutnät (dagar sida vid sida, som Excel) */
+  .pgrid{border-collapse:collapse;width:100%;table-layout:fixed;font-size:8.5px;}
+  .pgrid th,.pgrid td{border:1px solid #999;padding:1px 2px;text-align:center;overflow:hidden;}
+  .pgrid .tcol,.pgrid .tcell{width:32px;font-size:7px;color:#333;background:#f3f3f3;white-space:nowrap;}
+  .pgrid .dayh{background:#e3e9ef;font-size:10px;text-transform:uppercase;}
+  .pgrid .hallh{background:#f1f5f8;font-size:7.5px;font-weight:600;}
+  .pgrid .pcell{height:13px;}
+  .pgrid td.pblock{background:repeating-linear-gradient(45deg,#bdbdbd,#bdbdbd 4px,#a9a9a9 4px,#a9a9a9 8px);color:#fff;font-size:6.5px;}
+  .pgrid td.pclash{outline:2px solid #c62828;outline-offset:-2px;}
+  .pbal{margin-top:9px;font-size:9px;line-height:1.8;}
+  .pbal .pbi{display:inline-block;margin-right:9px;white-space:nowrap;}
+  .pbal .psw{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:-1px;margin-right:3px;}
+  @media print{
+    @page{ size:A4 landscape; margin:8mm; }
+    header,.palette,.banner,.summary,.toolbar,.legend,#days,.side,.booking .x,.booking .rs{display:none!important;}
+    .wrap{padding:0;display:block;} body{background:#fff;}
+    .printonly{display:block!important;}
+    .printhead{padding-bottom:6px;border-bottom:2px solid #333;margin-bottom:8px;}
+    .pgrid,.pbal{break-inside:avoid;}
+    /* tvinga webbläsaren att skriva ut bakgrundsfärgerna (lag-block, dag-rubriker, brickor) */
+    *{ -webkit-print-color-adjust:exact!important; print-color-adjust:exact!important; }
+  }
+  @media(max-width:980px){ .wrap{flex-direction:column;} .side{position:static;flex-basis:auto;width:100%;} }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Träningstider</h1>
+    <div class="sub">Klubbens veckoschema <span id="cloudStatus" class="cloud idle">· Lokalt läge</span></div>
+  </div>
+  <div class="toolbar">
+    <button class="tool" id="undoBtn" onclick="undo()" title="Ångra (Ctrl+Z)" disabled>↶ Ångra</button>
+    <button class="tool" id="redoBtn" onclick="redo()" title="Gör om (Ctrl+Shift+Z)" disabled>↷ Gör om</button>
+    <button class="tool primary" onclick="openSettings('grupper')">⚙ Inställningar</button>
+    <button class="tool" onclick="exportJSON()">⭳ Exportera</button>
+    <button class="tool" onclick="document.getElementById('imp').click()">⭱ Importera</button>
+    <input id="imp" type="file" accept="application/json" style="display:none" onchange="importJSON(event)">
+    <button class="tool" onclick="window.print()" title="Skriv ut eller spara som PDF">🖶 Skriv ut / PDF</button>
+  </div>
+</header>
+
+<div class="palette" id="palette"></div>
+
+<div class="wrap">
+  <div class="schedule">
+    <div class="printonly printhead"><h2>Träningstider – veckoschema</h2><div class="pd" id="printdate"></div></div>
+    <div class="banner" id="banner">
+      <span>⚠️ Schemat är inläst <b>ungefärligt från din bild</b> – kontrollera passen och dra för att justera. Allt du ändrar sparas automatiskt.</span>
+      <button onclick="this.parentNode.style.display='none'">✕</button>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div class="cattabs" id="catTabs"></div>
+    <div id="days"></div>
+    <div class="printonly" id="printgrid"></div>
+    <div class="printonly" id="printbalance"></div>
+  </div>
+
+  <div class="side">
+    <div class="card">
+      <h3>Balans · timmar (Schema / Bör ha)</h3>
+      <div id="balance"></div>
+      <div class="legend">
+        <b>Så funkar det:</b><br>
+        • <b>Allt räknas i timmar:</b> 60 min = 1, 90 min = 1,5, 30 min = 0,5.<br>
+        • Dra en grupp från listan upptill till en tid.<br>
+        • Dra i passets <b>underkant</b> för att förlänga/korta.<br>
+        • Dra hela passet för att flytta det.<br>
+        • Håll musen över ett pass och klicka <b>✕</b> för att ta bort.<br>
+        • Ångrat dig? <b>↶ Ångra</b> (eller Ctrl+Z).<br>
+        • Lägg till grupper och hallar via <b>⚙ Inställningar</b>.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Inställningar: grupper + hallar & dagar -->
+<div class="modal-back" id="settings" onclick="if(event.target===this)closeSettings()">
+  <div class="modal">
+    <div class="modal-h"><b>⚙ Inställningar</b><button class="tool" onclick="closeSettings()">Stäng</button></div>
+    <div class="modal-body" id="settingsBody"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------- Konfiguration ---------- */
+const SLOT_MIN=15, START_MIN=16*60+30, END_MIN=22*60;
+const N_SLOTS=(END_MIN-START_MIN)/SLOT_MIN;            // 11 pass à 30 min
+const DEFAULT_DAYS=["Måndag","Tisdag","Onsdag","Torsdag","Fredag"];
+const ALL_WEEKDAYS=["Måndag","Tisdag","Onsdag","Torsdag","Fredag","Lördag","Söndag"];
+const DEFAULT_HALLS=["Tibble CC","Gym","Ängsholmen","Vallentuna"];
+const DEFAULT_HALLS_BY_DAY={
+  "Måndag":["Tibble CC","Gym","Ängsholmen"],
+  "Tisdag":["Tibble CC","Gym","Ängsholmen","Vallentuna"],
+  "Onsdag":["Tibble CC","Gym","Ängsholmen"],
+  "Torsdag":["Tibble CC","Gym","Ängsholmen"],
+  "Fredag":["Tibble CC","Gym","Ängsholmen"]
+};
+const DEFAULT_TEAMS=[
+  {id:"P2014",name:"P2014",color:"#cc0000",text:"#fff",target:3,len:4},
+  {id:"P2013",name:"P2013",color:"#ff0000",text:"#fff",target:3,len:4},
+  {id:"P2012",name:"P2012",color:"#e06666",text:"#fff",target:3,len:4},
+  {id:"P16",  name:"P16",  color:"#e8927c",text:"#fff",target:6,len:4},
+  {id:"HU",   name:"HU",   color:"#ea9999",text:"#5a1414",target:4,len:4},
+  {id:"HA",   name:"HA",   color:"#f4cccc",text:"#5a1414",target:4,len:4},
+  {id:"F2014",name:"F2014",color:"#00b0f0",text:"#fff",target:3,len:4},
+  {id:"F2012",name:"F2012",color:"#6fa8dc",text:"#fff",target:3,len:4},
+  {id:"F16",  name:"F16",  color:"#9fc5e8",text:"#10324a",target:6,len:4},
+  {id:"DAM",  name:"DAM",  color:"#2986cc",text:"#fff",target:4,len:4},
+  {id:"MV",   name:"MV-träning",color:"#93c47d",text:"#13331a",target:1,len:2}
+];
+const clone=o=>JSON.parse(JSON.stringify(o));
+const teamById=id=>state.teams.find(t=>t.id===id);
+
+/* ---------- Exempeldata (ungefärligt avläst från bilden) ---------- */
+function exampleBookings(){
+  // literalerna nedan skrivs i 30-min-logik; *2 ger appens 15-min-enheter
+  const b=(day,hall,team,start,slots)=>({id:uid(),type:"team",team,day,hall,start:start*2,slots:slots*2});
+  const blk=(day,hall,start,slots)=>({id:uid(),type:"blocked",team:null,day,hall,start:start*2,slots:slots*2});
+  return [
+    // MÅNDAG
+    b("Måndag","Tibble CC","F16",0,2), b("Måndag","Tibble CC","HA",5,2),
+    b("Måndag","Tibble CC","HU",7,2),  b("Måndag","Tibble CC","DAM",9,2),
+    b("Måndag","Ängsholmen","P2012",1,2), b("Måndag","Ängsholmen","P2014",3,2),
+    b("Måndag","Ängsholmen","F2012",5,2), b("Måndag","Ängsholmen","P16",7,2),
+    b("Måndag","Ängsholmen","P16",9,2),
+    // TISDAG
+    b("Tisdag","Tibble CC","P2012",1,2), blk("Tisdag","Tibble CC",3,6), b("Tisdag","Tibble CC","DAM",9,2),
+    b("Tisdag","Ängsholmen","P2014",1,2), b("Tisdag","Ängsholmen","F2014",3,1),
+    b("Tisdag","Ängsholmen","P2013",5,1), b("Tisdag","Ängsholmen","HA",7,1),
+    b("Tisdag","Ängsholmen","HU",9,1),
+    blk("Tisdag","Vallentuna",0,7),
+    // ONSDAG
+    b("Onsdag","Tibble CC","F16",0,2), b("Onsdag","Tibble CC","HA",5,2), b("Onsdag","Tibble CC","DAM",7,3),
+    b("Onsdag","Ängsholmen","F2012",1,2), b("Onsdag","Ängsholmen","P16",5,2),
+    b("Onsdag","Ängsholmen","P16",7,2), b("Onsdag","Ängsholmen","HU",9,2)
+  ];
+}
+
+/* ---------- State ---------- */
+const LS_KEY="traningstider_v1";
+let state={ bookings:[], teams:[] };
+let counter=1; function uid(){return "b"+(counter++)+"_"+Math.floor(Math.random()*1e6);}
+let history=[], future=[], lastSaved=null, restoring=false;   // ångra/gör om
+
+// ----- Moln (Supabase): delad live-synk -----
+const SUPABASE_URL="https://cifalabilwsqafgympkg.supabase.co";
+const SUPABASE_KEY="sb_publishable_LFB24pbEVk1qK5SLKhurmw_5u34O3yz";
+const SCHEDULE_ID="main";
+const CLOUD_ENABLED=!!(SUPABASE_URL && SUPABASE_KEY && window.supabase);
+let sb=CLOUD_ENABLED ? window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY) : null;
+let applyingRemote=false, cloudTimer=null, cloudReady=false;   // cloudReady: pusha INTE förrän molnet hämtats
+
+function defaultState(){
+  return { bookings:exampleBookings(), teams:clone(DEFAULT_TEAMS), slotMin:15,
+           days:[...DEFAULT_DAYS], halls:[...DEFAULT_HALLS], hallsByDay:clone(DEFAULT_HALLS_BY_DAY),
+           categories:[], hallCat:{} };
+}
+function migrate(){
+  const hadTeams=Array.isArray(state.teams);
+  const needsSlotConv=(state.slotMin===undefined);   // äldre data var i 30-min-enheter
+  if(!state.teams){
+    state.teams=clone(DEFAULT_TEAMS);
+    if(state.targets) state.teams.forEach(t=>{ if(state.targets[t.id]!=null) t.target=state.targets[t.id]; });
+  }
+  state.teams.forEach(t=>{ if(t.len==null)t.len=4; if(!t.text)t.text=contrastText(t.color||"#888888"); });
+  delete state.targets;
+  if(!state.days) state.days=[...DEFAULT_DAYS];
+  if(!state.hallsByDay) state.hallsByDay=clone(DEFAULT_HALLS_BY_DAY);
+  if(!state.halls){ const seen=[...DEFAULT_HALLS];
+    Object.values(state.hallsByDay).forEach(a=>a.forEach(h=>{ if(!seen.includes(h)) seen.push(h); }));
+    state.halls=seen;
+  }
+  if(!state.categories) state.categories=[];
+  if(!state.hallCat) state.hallCat={};
+  // Engångskonvertering: gammal 30-min-data -> 15-min-bas (bevarar exakta tider)
+  if(needsSlotConv){
+    (state.bookings||[]).forEach(b=>{ b.start*=2; b.slots*=2; });
+    if(hadTeams) state.teams.forEach(t=>{ if(t.len!=null) t.len*=2; });
+    state.slotMin=15;
+  }
+}
+function load(){
+  try{ const raw=localStorage.getItem(LS_KEY); if(raw){ state=JSON.parse(raw); migrate(); return; } }
+  catch(e){}
+  state=defaultState();
+}
+// save() sköter även ångra-historiken: varje gång state ändras läggs det
+// föregående läget på history-stacken (men inte vid undo/redo).
+function save(){
+  const cur=JSON.stringify(state);
+  const changed=(lastSaved!==null && cur!==lastSaved);
+  if(changed && !restoring){
+    history.push(lastSaved);
+    if(history.length>100) history.shift();
+    future.length=0;          // ny ändring nollställer "gör om"
+  }
+  lastSaved=cur;
+  try{ localStorage.setItem(LS_KEY,cur); }catch(e){}
+  if(Date.now()-lastSnap>120000) snapshotBackup("auto");
+  if(CLOUD_ENABLED && cloudReady && !applyingRemote && changed){ clearTimeout(cloudTimer); cloudTimer=setTimeout(pushCloud,500); }
+}
+
+// ----- Lokala automatiska säkerhetskopior (säkerhetslina mot överskrivning) -----
+const BK_KEY="traningstider_backups";
+let lastSnap=0;
+function loadBackups(){ try{ return JSON.parse(localStorage.getItem(BK_KEY))||[]; }catch(e){ return []; } }
+function snapshotBackup(reason){
+  try{
+    if(!state.bookings || !state.bookings.length) return;          // skippa tomma
+    const data=JSON.parse(JSON.stringify(state));
+    const arr=loadBackups(), last=arr[arr.length-1];
+    if(last && JSON.stringify(last.data)===JSON.stringify(data)) return;   // dedup
+    arr.push({ts:new Date().toISOString(), reason:reason||"", n:data.bookings.length, data});
+    while(arr.length>15) arr.shift();
+    localStorage.setItem(BK_KEY, JSON.stringify(arr));
+    lastSnap=Date.now();
+  }catch(e){}
+}
+function restoreBackup(i){
+  const arr=loadBackups(), bk=arr[i]; if(!bk) return;
+  if(!confirm("Återställa version från "+new Date(bk.ts).toLocaleString("sv-SE")+" ("+bk.n+" pass)? Nuvarande schema ersätts (kan ångras med Ctrl+Z).")) return;
+  snapshotBackup("före återställning");
+  state=JSON.parse(JSON.stringify(bk.data)); migrate(); render();
+  toast("Återställde säkerhetskopia");
+}
+function backupsListHTML(){
+  const arr=loadBackups();
+  if(!arr.length) return '<p class="hint">Inga sparade versioner än.</p>';
+  let h='<div class="bklist">';
+  for(let i=arr.length-1;i>=0;i--){ const b=arr[i];
+    h+='<div class="bkrow"><span>'+new Date(b.ts).toLocaleString("sv-SE")+' · '+b.n+' pass'+(b.reason?' · '+esc(b.reason):'')+'</span>'
+      +'<button class="tool" onclick="restoreBackup('+i+')">Återställ</button></div>';
+  }
+  return h+'</div>';
+}
+
+/* ---------- Hjälpfunktioner ---------- */
+const esc=s=>String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function fmt(m){ return Math.floor(m/60)+"."+String(m%60).padStart(2,"0"); }
+function slotLabel(i){ return fmt(START_MIN+i*SLOT_MIN); }                  // starttid för raden
+function onHalfHour(i){ return (START_MIN+i*SLOT_MIN)%30===0; }             // glesa ut etiketter (var 30:e min)
+function overlaps(aS,aL,bS,bL){ return aS<bS+bL && bS<aS+aL; }
+let scheduleCat="__all__";   // vald hall-kategori-flik i schemavyn (personlig, ej synkad)
+function hallsForDay(day){
+  const act=state.hallsByDay[day]||[];
+  let hs=state.halls.filter(h=>act.includes(h));
+  if(scheduleCat!=="__all__") hs=hs.filter(h=>(state.hallCat||{})[h]===scheduleCat);
+  return hs;
+}
+function contrastText(hex){
+  const c=String(hex).replace("#",""); if(c.length!==6) return "#ffffff";
+  const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);
+  return (0.299*r+0.587*g+0.114*b)/255 > 0.62 ? "#16242e" : "#ffffff";
+}
+// Gemensamma småhjälpare (delas av grupp-/hallåtgärder)
+function isDup(names,name,exceptIdx){ const lc=name.toLowerCase();
+  return names.some((n,i)=> i!==exceptIdx && n.toLowerCase()===lc); }
+function countBookings(pred){ return state.bookings.filter(pred).length; }
+function confirmDelete(thing,count){ return confirm(`Ta bort ${thing}${count?` och dess ${count} pass`:""}?`); }
+
+// Lediga pass framåt från "start" i en hall/dag (exkl. ett visst boknings-id)
+function freeAhead(day,hall,start,excludeId){
+  let k=0;
+  while(start+k<N_SLOTS){
+    const s=start+k;
+    const occupied=state.bookings.some(bk=>bk.id!==excludeId && bk.day===day && bk.hall===hall
+                       && s>=bk.start && s<bk.start+bk.slots);
+    if(occupied) break;
+    k++;
+  }
+  return k;
+}
+function fits(day,hall,start,slots,excludeId){
+  if(start<0||start+slots>N_SLOTS) return false;
+  return !state.bookings.some(bk=>bk.id!==excludeId && bk.day===day && bk.hall===hall
+            && overlaps(start,slots,bk.start,bk.slots));
+}
+
+// Krockar: grupp som krockar med sig själv (samma tid, samma dag, olika hall)
+function findClashes(){
+  const clash=new Set();
+  const team=state.bookings.filter(b=>b.type==="team");
+  for(let i=0;i<team.length;i++)for(let j=i+1;j<team.length;j++){
+    const a=team[i],c=team[j];
+    if(a.team===c.team && a.day===c.day && overlaps(a.start,a.slots,c.start,c.slots)){
+      clash.add(a.id); clash.add(c.id);
+    }
+  }
+  return clash;
+}
+
+/* ---------- Rendering ---------- */
+function render(){
+  renderPalette(); renderCatTabs(); renderDays(); renderBalance(); renderSummary(); renderPrint(); save();
+  const sm=document.getElementById("settings"); if(sm && sm.style.display==="flex") renderSettings();
+  updateUndoButtons();
+}
+
+// Summan PER GRUPP mätt i TIMMAR (60 min = 1, 90 min = 1,5, 30 min = 0,5)
+function teamHours(){ const m={}; state.teams.forEach(t=>m[t.id]=0);
+  state.bookings.forEach(b=>{ if(b.type==="team"&&m[b.team]!=null) m[b.team]+=b.slots*SLOT_MIN/60; }); return m; }
+function statusOf(sched,tgt){ return sched===tgt?"ok":(sched<tgt?"under":"over"); }
+function num(n){ return (Math.round(n*100)/100).toString().replace(".",","); }   // 1.5 -> "1,5"
+
+function renderPalette(){
+  const c=teamHours(), el=document.getElementById("palette");
+  let h='<span class="ptitle">Dra ut en grupp ▸</span>';
+  state.teams.forEach(t=>{
+    const st=statusOf(c[t.id],t.target);
+    h+=`<div class="chip" draggable="true" ondragstart="dragNew(event,'${t.id}')">
+          <span class="sw" style="background:${t.color}"></span>
+          <span class="nm">${esc(t.name)}</span>
+          <span class="cnt ${st}">${num(c[t.id])}/${num(t.target)}</span>
+        </div>`;
+  });
+  h+=`<div class="chip blocked" draggable="true" ondragstart="dragNew(event,'__blocked__')">
+        <span class="sw" style="background:#9aa3ab"></span><span class="nm">Upptaget</span>
+      </div>`;
+  el.innerHTML=h;
+}
+
+function renderDays(){
+  const clash=findClashes();
+  let h="";
+  state.days.forEach(day=>{
+    const halls=hallsForDay(day);
+    if(halls.length===0){
+      const msg = scheduleCat==='__all__'
+        ? `Inga hallar valda för ${day}. Öppna <b>⚙ Inställningar</b> för att välja hallar.`
+        : `Inga hallar i kategorin "${esc(scheduleCat)}" för ${day}.`;
+      h+=`<div class="day"><h2>${day}</h2><div class="emptyhall">${msg}</div></div>`;
+      return;
+    }
+    h+=`<div class="day"><h2>${day}</h2><div class="gridscroll"><div class="grid"
+         style="grid-template-columns:74px repeat(${halls.length},minmax(96px,1fr));
+                grid-template-rows:var(--headH) repeat(${N_SLOTS},var(--rowH));">`;
+    h+=`<div class="corner"></div>`;
+    halls.forEach(hl=>h+=`<div class="ghead">${esc(hl)}</div>`);
+    for(let s=0;s<N_SLOTS;s++){
+      h+=`<div class="tlabel" style="grid-column:1;grid-row:${s+2}">${onHalfHour(s)?slotLabel(s):''}</div>`;
+      halls.forEach((hl,hi)=>{
+        h+=`<div class="cell" data-day="${esc(day)}" data-hall="${esc(hl)}" data-slot="${s}"
+              style="grid-column:${hi+2};grid-row:${s+2}"
+              ondragover="cellOver(event,this)" ondragleave="this.classList.remove('over')"
+              ondrop="cellDrop(event,this)"></div>`;
+      });
+    }
+    state.bookings.filter(b=>b.day===day).forEach(bk=>{
+      const hi=halls.indexOf(bk.hall); if(hi<0) return;
+      const t=bk.type==="team"?teamById(bk.team):null;
+      if(bk.type==="team" && !t) return;
+      const style=t?`background:${t.color};color:${t.text};`:"";
+      const label=t?t.name:"Upptaget";
+      const span=`grid-column:${hi+2};grid-row:${bk.start+2}/span ${bk.slots};`;
+      const startM=START_MIN+bk.start*SLOT_MIN, endM=startM+bk.slots*SLOT_MIN;
+      h+=`<div class="booking ${bk.type==='blocked'?'blocked':''} ${clash.has(bk.id)?'clash':''}"
+            draggable="true" style="${span}${style}"
+            ondragstart="dragMove(event,'${bk.id}')"
+            title="${esc(label)} ${fmt(startM)}–${fmt(endM)}">
+            <span class="x" onclick="delBooking(event,'${bk.id}')">✕</span>
+            <span>${esc(label)}<span class="t">${fmt(startM)}–${fmt(endM)}</span></span>
+            <span class="rs" onmousedown="startResize(event,'${bk.id}')"></span>
+          </div>`;
+    });
+    h+="</div></div></div>";
+  });
+  document.getElementById("days").innerHTML=h;
+}
+
+function renderBalance(){
+  const c=teamHours(); let h="";
+  state.teams.forEach((t,i)=>{
+    const sched=c[t.id], diff=t.target-sched, st=statusOf(sched,t.target);
+    const dtxt=diff===0?"✓":(diff>0?"−"+num(diff):"+"+num(-diff));
+    h+=`<div class="balrow">
+          <span class="sw" style="background:${t.color}"></span>
+          <span class="nm">${esc(t.name)}</span>
+          <span class="sched">${num(sched)}&nbsp;/&nbsp;<input class="tgt" type="number" min="0" step="0.25" value="${t.target}"
+               onchange="setTeamTarget(${i},this.value)"></span>
+          <span class="diff ${st}">${dtxt}</span>
+        </div>`;
+  });
+  document.getElementById("balance").innerHTML=h;
+}
+
+function renderSummary(){
+  const c=teamHours(); const team=state.bookings.filter(b=>b.type==="team");
+  const total=team.length;
+  const totalH=team.reduce((s,b)=>s+b.slots*SLOT_MIN/60,0);
+  const balanced=state.teams.filter(t=>c[t.id]===t.target).length;
+  const clashes=findClashes().size;
+  document.getElementById("summary").innerHTML=`
+    <div class="stat"><div class="v">${total}</div><div class="l">inlagda pass</div></div>
+    <div class="stat"><div class="v">${num(totalH)}</div><div class="l">timmar totalt</div></div>
+    <div class="stat"><div class="v">${balanced}/${state.teams.length}</div><div class="l">grupper i balans</div></div>
+    <div class="stat ${clashes?'alert':''}"><div class="v">${clashes/2|0}</div><div class="l">krockar</div></div>`;
+}
+
+function renderCatTabs(){
+  const el=document.getElementById("catTabs"); if(!el) return;
+  const cats=state.categories||[];
+  if(!cats.length){ el.innerHTML=""; return; }            // inga flikar om inga kategorier
+  let h=`<button class="ctab ${scheduleCat==='__all__'?'on':''}" onclick="setSchedCat(-1)">Alla hallar</button>`;
+  cats.forEach((c,ci)=>{ h+=`<button class="ctab ${scheduleCat===c?'on':''}" onclick="setSchedCat(${ci})">${esc(c)}</button>`; });
+  el.innerHTML=h;
+}
+function setSchedCat(i){ scheduleCat=(i<0)?"__all__":(state.categories[i]||"__all__"); render(); }
+
+/* ---------- Utskriftsvy: hela veckan i ETT rutnät (för PDF på en sida) ---------- */
+function renderPrint(){
+  const g=document.getElementById("printgrid"), b=document.getElementById("printbalance");
+  if(g) g.innerHTML=printGridHTML();
+  if(b) b.innerHTML=printBalanceHTML();
+}
+function printGridHTML(){
+  const clash=findClashes();
+  const cols=[]; state.days.forEach(d=>hallsForDay(d).forEach(h=>cols.push({day:d,hall:h})));
+  if(!cols.length) return '<p class="hint">Inga hallar/dagar att visa.</p>';
+  let h='<table class="pgrid"><thead><tr><th class="tcol" rowspan="2">Tid</th>';
+  state.days.forEach(d=>{ const n=hallsForDay(d).length; if(n) h+=`<th class="dayh" colspan="${n}">${esc(d)}</th>`; });
+  h+='</tr><tr>';
+  cols.forEach(c=>h+=`<th class="hallh">${esc(c.hall)}</th>`);
+  h+='</tr></thead><tbody>';
+  const skip=new Array(cols.length).fill(0);          // antal rader varje kolumn är "täckt" av ett rowspan ovan
+  for(let s=0;s<N_SLOTS;s++){
+    h+=`<tr><td class="tcell">${onHalfHour(s)?slotLabel(s):''}</td>`;
+    cols.forEach((c,ci)=>{
+      if(skip[ci]>0){ skip[ci]--; return; }
+      const bk=state.bookings.find(x=>x.day===c.day && x.hall===c.hall && x.start===s);
+      if(!bk){ h+='<td class="pcell"></td>'; return; }
+      const t=bk.type==='team'?teamById(bk.team):null;
+      if(bk.type==='team' && !t){ h+='<td class="pcell"></td>'; return; }
+      const style=t?`background:${t.color};color:${t.text};`:'';
+      const label=t?esc(t.name):'Upptaget';
+      const cls='pcell'+(bk.type==='blocked'?' pblock':'')+(clash.has(bk.id)?' pclash':'');
+      h+=`<td class="${cls}" rowspan="${bk.slots}" style="${style}">${label}</td>`;
+      skip[ci]=bk.slots-1;
+    });
+    h+='</tr>';
+  }
+  return h+'</tbody></table>';
+}
+function printBalanceHTML(){
+  const c=teamHours();
+  const items=state.teams.map(t=>{
+    const diff=t.target-c[t.id];
+    const d=diff===0?'✓':(diff>0?'−'+num(diff):'+'+num(-diff));
+    return `<span class="pbi"><span class="psw" style="background:${t.color}"></span>${esc(t.name)} ${num(c[t.id])}/${num(t.target)} (${d})</span>`;
+  }).join('');
+  return '<div class="pbal"><b>Balans (timmar):</b> '+items+'</div>';
+}
+
+/* ---------- Ångra / Gör om ---------- */
+function undo(){
+  if(!history.length){ toast("Inget att ångra"); return; }
+  future.push(JSON.stringify(state));
+  restoring=true; state=JSON.parse(history.pop()); render(); restoring=false;
+  updateUndoButtons(); toast("Ångrade");
+}
+function redo(){
+  if(!future.length){ toast("Inget att göra om"); return; }
+  history.push(JSON.stringify(state));
+  restoring=true; state=JSON.parse(future.pop()); render(); restoring=false;
+  updateUndoButtons(); toast("Gjorde om");
+}
+function updateUndoButtons(){
+  const u=document.getElementById("undoBtn"), r=document.getElementById("redoBtn");
+  if(u) u.disabled=!history.length;
+  if(r) r.disabled=!future.length;
+}
+
+/* ---------- Inställningar ---------- */
+let settingsTab="grupper";
+function openSettings(tab){ if(tab) settingsTab=tab; document.getElementById("settings").style.display="flex"; renderSettings(); }
+function closeSettings(){ document.getElementById("settings").style.display="none"; }
+function setTab(t){ settingsTab=t; renderSettings(); }
+
+function renderSettings(){
+  let h='<div class="tabs">'
+    +`<button class="tab ${settingsTab==='grupper'?'on':''}" onclick="setTab('grupper')">Grupper</button>`
+    +`<button class="tab ${settingsTab==='hallar'?'on':''}" onclick="setTab('hallar')">Hallar &amp; dagar</button>`
+    +`<button class="tab ${settingsTab==='avancerat'?'on':''}" onclick="setTab('avancerat')">Avancerat</button>`
+    +'</div>';
+  h+= settingsTab==='grupper' ? groupsTabHTML() : settingsTab==='hallar' ? hallsTabHTML() : advancedTabHTML();
+  document.getElementById("settingsBody").innerHTML=h;
+}
+
+function groupsTabHTML(){
+  const c=teamHours();
+  let h='<p class="hint">Lägg till, döp om, färglägg och sätt mål (Bör ha) per grupp. Passlängd används som standard när du drar ut gruppen på schemat.</p>';
+  h+='<div class="mscroll"><table class="hallmatrix"><thead><tr>'
+    +'<th>Färg</th><th>Grupp</th><th>Bör ha (h)</th><th>Inlagda (h)</th><th>Passlängd</th><th></th></tr></thead><tbody>';
+  if(state.teams.length===0) h+='<tr><td colspan="6" class="hint">Inga grupper än – lägg till en nedan.</td></tr>';
+  state.teams.forEach((t,i)=>{
+    const mins=t.len*SLOT_MIN;
+    const opts=[15,30,45,60,75,90,105,120].map(m=>`<option value="${m}" ${m===mins?'selected':''}>${m} min</option>`).join("");
+    h+=`<tr>
+      <td style="text-align:center"><input type="color" value="${t.color}" onchange="setTeamColor(${i},this.value)"></td>
+      <td><input class="hallname" value="${esc(t.name)}" onchange="renameTeam(${i},this.value)"></td>
+      <td style="text-align:center"><input class="num" type="number" min="0" step="0.25" value="${t.target}" onchange="setTeamTarget(${i},this.value)"></td>
+      <td style="text-align:center;color:var(--muted)">${num(c[t.id])}</td>
+      <td style="text-align:center"><select onchange="setTeamLen(${i},this.value)">${opts}</select></td>
+      <td class="del"><button class="tool danger" onclick="deleteTeam(${i})">🗑</button></td>
+    </tr>`;
+  });
+  h+='</tbody></table></div>';
+  h+='<div class="addhall"><input type="color" id="newteamcolor" value="#4a90d9" title="Färg">'
+    +'<input type="text" id="newteam" placeholder="Ny grupp, t.ex. P2015…" onkeydown="if(event.key===\'Enter\')addTeam()">'
+    +'<button class="tool primary" onclick="addTeam()">+ Lägg till grupp</button></div>';
+  return h;
+}
+
+function hallsTabHTML(){
+  let h='<h4>Träningsdagar</h4><div class="daytoggles">';
+  ALL_WEEKDAYS.forEach((d,wi)=>{
+    const on=state.days.includes(d);
+    h+=`<label class="dtog ${on?'on':''}"><input type="checkbox" ${on?'checked':''} onchange="toggleDay(${wi})"> ${d}</label>`;
+  });
+  h+='</div>';
+  h+='<h4>Hall-kategorier <span style="font-weight:400;color:var(--muted)">(blir flikar i schemat)</span></h4>';
+  h+='<p class="hint">Skapa kategorier, t.ex. "Små hallar", och välj sedan kategori per hall i tabellen nedan. Varje kategori blir en egen flik ovanför schemat.</p>';
+  h+='<div class="daytoggles">';
+  (state.categories||[]).forEach((c,ci)=>{ h+=`<span class="catchip">${esc(c)}<button onclick="deleteCategory(${ci})" title="Ta bort kategori">✕</button></span>`; });
+  if(!(state.categories||[]).length) h+='<span class="hint">Inga kategorier än.</span>';
+  h+='</div>';
+  h+='<div class="addhall" style="margin-top:8px"><input type="text" id="newcat" placeholder="Ny kategori, t.ex. Små hallar…" onkeydown="if(event.key===\'Enter\')addCategory()"><button class="tool" onclick="addCategory()">+ Lägg till kategori</button></div>';
+  h+='<h4>Hallar per dag</h4><p class="hint">Bocka i vilka hallar som används respektive dag, och välj ev. kategori. Skriv i namnrutan för att byta namn.</p>';
+  h+='<div class="mscroll"><table class="hallmatrix"><thead><tr><th>Hall</th><th>Kategori</th>';
+  state.days.forEach(d=>h+=`<th>${d.slice(0,3)}</th>`);
+  h+='<th></th></tr></thead><tbody>';
+  if(state.halls.length===0){
+    h+=`<tr><td colspan="${state.days.length+3}" class="hint">Inga hallar än – lägg till en nedan.</td></tr>`;
+  }
+  state.halls.forEach((hall,hi)=>{
+    h+=`<tr><td><input class="hallname" value="${esc(hall)}" onchange="renameHall(${hi},this.value)"></td>`;
+    const catOpts='<option value="">(ingen)</option>'+(state.categories||[]).map(c=>`<option value="${esc(c)}" ${(state.hallCat||{})[hall]===c?'selected':''}>${esc(c)}</option>`).join('');
+    h+=`<td><select onchange="setHallCat(${hi},this.value)">${catOpts}</select></td>`;
+    state.days.forEach((d,di)=>{
+      const on=(state.hallsByDay[d]||[]).includes(hall);
+      h+=`<td style="text-align:center"><input type="checkbox" ${on?'checked':''} onchange="toggleHallDay(${di},${hi})"></td>`;
+    });
+    h+=`<td class="del"><button class="tool danger" onclick="deleteHall(${hi})">🗑</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  h+='<div class="addhall"><input type="text" id="newhall" placeholder="Ny hall, t.ex. Sporthallen…" '
+    +'onkeydown="if(event.key===\'Enter\')addHall()"><button class="tool primary" onclick="addHall()">+ Lägg till hall</button></div>';
+  return h;
+}
+
+/* ---- Grupper: åtgärder ---- */
+function addTeam(){
+  const ni=document.getElementById("newteam"), ci=document.getElementById("newteamcolor");
+  const name=(ni.value||"").trim();
+  if(!name){ toast("Skriv ett gruppnamn"); return; }
+  if(isDup(state.teams.map(t=>t.name), name)){ toast("Gruppen finns redan"); return; }
+  const color=ci.value||"#4a90d9";
+  state.teams.push({id:uid(),name,color,text:contrastText(color),target:1,len:4});
+  ni.value=""; render(); toast(`Gruppen "${name}" tillagd`);
+}
+function renameTeam(i,val){
+  const name=(val||"").trim(), t=state.teams[i];
+  if(!name || name===t.name){ renderSettings(); return; }
+  if(isDup(state.teams.map(x=>x.name), name, i)){ toast("Namnet används redan"); renderSettings(); return; }
+  t.name=name; render();
+}
+function setTeamColor(i,val){ state.teams[i].color=val; state.teams[i].text=contrastText(val); render(); }
+function setTeamTarget(i,val){ const x=Math.max(0,parseFloat(String(val).replace(",","."))||0);
+  state.teams[i].target=Math.round(x*4)/4; render(); }   // tillåt kvartstimmar (0,25)
+function setTeamLen(i,minutes){ state.teams[i].len=Math.max(1,Math.round((parseInt(minutes)||60)/SLOT_MIN)); render(); }
+function deleteTeam(i){
+  const t=state.teams[i], n=countBookings(b=>b.team===t.id);
+  if(!confirmDelete(`gruppen "${t.name}"`, n)) return;
+  state.bookings=state.bookings.filter(b=>b.team!==t.id);
+  state.teams.splice(i,1); render();
+}
+
+/* ---- Hallar & dagar: åtgärder ---- */
+function toggleDay(wi){
+  const d=ALL_WEEKDAYS[wi];
+  if(state.days.includes(d)){
+    const n=countBookings(b=>b.day===d);
+    if(n>0 && !confirm(`${d} har ${n} inlagda pass. Ta bort dagen och dess pass?`)){ renderSettings(); return; }
+    state.bookings=state.bookings.filter(b=>b.day!==d);
+    state.days=state.days.filter(x=>x!==d);
+  } else {
+    state.days=ALL_WEEKDAYS.filter(x=>state.days.includes(x)||x===d);
+    if(!state.hallsByDay[d]) state.hallsByDay[d]=[...state.halls];
+  }
+  render();
+}
+function addHall(){
+  const inp=document.getElementById("newhall"); const name=(inp.value||"").trim();
+  if(!name){ toast("Skriv ett hallnamn"); return; }
+  if(isDup(state.halls, name)){ toast("Hallen finns redan"); return; }
+  state.halls.push(name);
+  state.days.forEach(d=>{ (state.hallsByDay[d]=state.hallsByDay[d]||[]).push(name); });
+  inp.value=""; render(); toast(`Hallen "${name}" tillagd`);
+}
+function renameHall(hi,val){
+  const name=(val||"").trim(), old=state.halls[hi];
+  if(!name || name===old){ renderSettings(); return; }
+  if(isDup(state.halls, name, hi)){ toast("Namnet används redan"); renderSettings(); return; }
+  state.halls[hi]=name;
+  Object.keys(state.hallsByDay).forEach(d=>{ state.hallsByDay[d]=state.hallsByDay[d].map(h=>h===old?name:h); });
+  state.bookings.forEach(b=>{ if(b.hall===old) b.hall=name; });
+  render();
+}
+function deleteHall(hi){
+  const name=state.halls[hi], n=countBookings(b=>b.hall===name);
+  if(!confirmDelete(`hallen "${name}"`, n)) return;
+  state.halls.splice(hi,1);
+  Object.keys(state.hallsByDay).forEach(d=>{ state.hallsByDay[d]=state.hallsByDay[d].filter(h=>h!==name); });
+  state.bookings=state.bookings.filter(b=>b.hall!==name);
+  render();
+}
+function toggleHallDay(di,hi){
+  const d=state.days[di], name=state.halls[hi];
+  const arr=state.hallsByDay[d]=state.hallsByDay[d]||[];
+  if(arr.includes(name)){
+    const n=countBookings(b=>b.day===d && b.hall===name);
+    if(n>0 && !confirm(`${name} på ${d} har ${n} pass. Ta bort hallen den dagen och dess pass?`)){ renderSettings(); return; }
+    state.hallsByDay[d]=arr.filter(h=>h!==name);
+    state.bookings=state.bookings.filter(b=>!(b.day===d && b.hall===name));
+  } else {
+    arr.push(name);
+  }
+  render();
+}
+
+/* ---- Hall-kategorier ---- */
+function addCategory(){
+  const inp=document.getElementById("newcat"); const name=(inp.value||"").trim();
+  if(!name){ toast("Skriv ett kategorinamn"); return; }
+  if((state.categories||[]).some(c=>c.toLowerCase()===name.toLowerCase())){ toast("Kategorin finns redan"); return; }
+  (state.categories=state.categories||[]).push(name);
+  inp.value=""; render(); toast(`Kategorin "${name}" tillagd`);
+}
+function deleteCategory(ci){
+  const c=state.categories[ci];
+  if(!confirm(`Ta bort kategorin "${c}"? Hallarna behålls men hamnar utan kategori.`)) return;
+  state.categories.splice(ci,1);
+  Object.keys(state.hallCat||{}).forEach(h=>{ if(state.hallCat[h]===c) delete state.hallCat[h]; });
+  if(scheduleCat===c) scheduleCat="__all__";
+  render();
+}
+function setHallCat(hi,val){
+  const name=state.halls[hi];
+  if(!val) delete state.hallCat[name]; else (state.hallCat=state.hallCat||{})[name]=val;
+  render();
+}
+
+/* ---------- Interaktion: drag & släpp ---------- */
+let dragData=null;
+function dragNew(e,team){ dragData={kind:"new",team}; e.dataTransfer.effectAllowed="copy"; }
+function dragMove(e,id){ dragData={kind:"move",id}; e.dataTransfer.effectAllowed="move"; }
+function cellOver(e,cell){ if(!dragData)return; e.preventDefault(); cell.classList.add("over"); }
+function cellDrop(e,cell){
+  e.preventDefault(); cell.classList.remove("over"); if(!dragData) return;
+  const day=cell.dataset.day, hall=cell.dataset.hall, start=+cell.dataset.slot;
+  if(dragData.kind==="new"){
+    const blocked=dragData.team==="__blocked__";
+    const t=blocked?null:teamById(dragData.team);
+    const want=blocked?2:((t&&t.len)||2);
+    const free=freeAhead(day,hall,start,null);
+    if(free<1){ toast("Tiden är upptagen"); dragData=null; return; }
+    const slots=Math.min(want,free);
+    state.bookings.push({id:uid(),type:blocked?"blocked":"team",
+        team:blocked?null:dragData.team,day,hall,start,slots});
+  } else {
+    const bk=state.bookings.find(b=>b.id===dragData.id);
+    if(bk){ if(!fits(day,hall,start,bk.slots,bk.id)){ toast("Får inte plats där"); dragData=null; return; }
+            bk.day=day; bk.hall=hall; bk.start=start; }
+  }
+  dragData=null; render();
+}
+function delBooking(e,id){ e.stopPropagation(); state.bookings=state.bookings.filter(b=>b.id!==id); render(); }
+
+/* ---------- Interaktion: ändra längd ---------- */
+let resizing=null;
+function startResize(e,id){
+  e.preventDefault(); e.stopPropagation();
+  const bk=state.bookings.find(b=>b.id===id); if(!bk) return;
+  const block=e.target.closest(".booking"); block.draggable=false;
+  const rowH=parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rowH"));
+  resizing={bk,startY:e.clientY,orig:bk.slots,rowH,maxLen:freeAhead(bk.day,bk.hall,bk.start,bk.id),block};
+  document.addEventListener("mousemove",onResize);
+  document.addEventListener("mouseup",endResize);
+}
+function onResize(e){
+  if(!resizing) return;
+  const d=Math.round((e.clientY-resizing.startY)/resizing.rowH);
+  let n=Math.max(1,Math.min(resizing.orig+d,resizing.maxLen));
+  if(n!==resizing.bk.slots){ resizing.bk.slots=n;
+    resizing.block.style.gridRow=`${resizing.bk.start+2}/span ${n}`;
+    const sM=START_MIN+resizing.bk.start*SLOT_MIN;
+    resizing.block.querySelector(".t").textContent=fmt(sM)+"–"+fmt(sM+n*SLOT_MIN);
+  }
+}
+function endResize(){
+  document.removeEventListener("mousemove",onResize);
+  document.removeEventListener("mouseup",endResize);
+  if(resizing){ resizing.block.draggable=true; resizing=null; render(); }
+}
+
+/* ---------- Avancerat / farlig zon ---------- */
+function advancedTabHTML(){
+  return ''
+    +'<h4>Säkerhetskopiera</h4>'
+    +'<p class="hint">Ladda ner en kopia av hela schemat (bra att göra före stora ändringar) eller läs in en sparad kopia.</p>'
+    +'<div class="addhall" style="margin-top:0">'
+    +'<button class="tool" onclick="exportJSON()">⭳ Exportera kopia</button>'
+    +'<button class="tool" onclick="document.getElementById(\'imp\').click()">⭱ Importera kopia</button>'
+    +'</div>'
+    +'<h4>Lokala versioner (sparas automatiskt)</h4>'
+    +'<p class="hint">De senaste versionerna sparas på den här enheten som en säkerhetslina om något skulle skrivas över. Klicka för att återställa.</p>'
+    + backupsListHTML()
+    +'<h4>Farlig zon</h4>'
+    +'<p class="hint">Dessa åtgärder påverkar <b>hela det delade schemat för alla</b>. Skriv bekräftelseordet för att aktivera knappen. (Du kan ångra med Ctrl+Z direkt efteråt.)</p>'
+    +'<div class="dzone"><h5>Töm schema</h5><p>Tar bort alla inlagda pass. Grupper, hallar och mål behålls.</p>'
+    +'<div class="row"><input id="cfClear" placeholder="Skriv TÖM" autocomplete="off" '
+    +'oninput="document.getElementById(\'bClear\').disabled=(this.value.trim().toUpperCase()!==\'TÖM\')">'
+    +'<button class="tool danger" id="bClear" disabled onclick="doClearAll()">Töm schemat</button></div></div>'
+    +'<div class="dzone"><h5>Återställ exempel</h5><p>Ersätter <b>hela</b> schemat (pass, grupper, hallar) med ursprungsexemplet. Allt nuvarande försvinner.</p>'
+    +'<div class="row"><input id="cfReset" placeholder="Skriv ÅTERSTÄLL" autocomplete="off" '
+    +'oninput="document.getElementById(\'bReset\').disabled=(this.value.trim().toUpperCase()!==\'ÅTERSTÄLL\')">'
+    +'<button class="tool danger" id="bReset" disabled onclick="doResetExample()">Återställ exempel</button></div></div>';
+}
+function doClearAll(){ snapshotBackup("före tömning"); state.bookings=[]; render(); toast("Schemat tömt – tryck Ctrl+Z för att ångra"); }
+function doResetExample(){ snapshotBackup("före återställning"); state=defaultState(); render(); toast("Återställt till exempel – tryck Ctrl+Z för att ångra"); }
+
+function exportJSON(){
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download="traningstider-schema.json"; a.click(); URL.revokeObjectURL(a.href);
+}
+function importJSON(ev){
+  const f=ev.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ const d=JSON.parse(r.result);
+      if(d&&d.bookings){ snapshotBackup("före import"); state=d; migrate(); render(); toast("Schema inläst"); }
+      else toast("Filen ser inte rätt ut");
+    }catch(e){ toast("Kunde inte läsa filen"); } };
+  r.readAsText(f); ev.target.value="";
+}
+
+let toastTimer;
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),1800); }
+
+/* ---------- Tangentbord: Ctrl+Z / Ctrl+Shift+Z (ej i textfält) ---------- */
+document.addEventListener("keydown",e=>{
+  const tag=(e.target.tagName||"").toLowerCase();
+  if(tag==="input"||tag==="textarea"||tag==="select") return;
+  if(e.ctrlKey||e.metaKey){
+    const k=e.key.toLowerCase();
+    if(k==="z"){ e.preventDefault(); e.shiftKey?redo():undo(); }
+    else if(k==="y"){ e.preventDefault(); redo(); }
+  }
+});
+
+/* ---------- Utskriftsdatum sätts vid utskrift ---------- */
+window.addEventListener("beforeprint",()=>{ renderPrint(); const e=document.getElementById("printdate");
+  if(e) e.textContent="Utskrivet "+new Date().toLocaleDateString("sv-SE")+(scheduleCat!=="__all__"?" · "+scheduleCat:""); });
+
+/* ---------- Moln: synk & live-uppdatering ---------- */
+function setCloudStatus(s){
+  const e=document.getElementById("cloudStatus"); if(!e) return;
+  const map={ idle:["· Lokalt läge","idle"], connecting:["· Ansluter…","busy"],
+    synced:["· ✓ Synkad","ok"], saving:["· Sparar…","busy"], offline:["· ⚠ Offline (sparat lokalt)","bad"] };
+  const v=map[s]||["",""]; e.textContent=v[0]; e.className="cloud "+v[1];
+}
+async function pushCloud(){
+  if(!sb) return;
+  setCloudStatus("saving");
+  try{
+    const {error}=await sb.from("traningstider_schema")
+      .upsert({id:SCHEDULE_ID,data:state,updated_at:new Date().toISOString()},{onConflict:"id"});
+    if(error) throw error;
+    setCloudStatus("synced");
+  }catch(e){ setCloudStatus("offline"); console.warn("Moln-spar misslyckades:",e); }
+}
+function subscribeRealtime(){
+  sb.channel("traningstider-"+SCHEDULE_ID)
+    .on("postgres_changes",
+        {event:"*",schema:"public",table:"traningstider_schema",filter:"id=eq."+SCHEDULE_ID},
+        payload=>{
+          const incoming=payload.new && payload.new.data; if(!incoming) return;
+          if(JSON.stringify(incoming)===JSON.stringify(state)) return;   // vår egen ändring – hoppa
+          applyingRemote=true; state=incoming; migrate(); restoring=true; render(); restoring=false; applyingRemote=false;
+          setCloudStatus("synced"); toast("Schemat uppdaterades av någon annan");
+        })
+    .subscribe();
+}
+async function initCloud(){
+  setCloudStatus("connecting");
+  try{
+    const {data,error}=await sb.from("traningstider_schema").select("data").eq("id",SCHEDULE_ID).maybeSingle();
+    if(error) throw error;
+    if(data && data.data && data.data.bookings){           // moln-schema finns -> använd det
+      snapshotBackup("före molnsynk");                     // säkra lokal data INNAN den skrivs över
+      applyingRemote=true; state=data.data; migrate(); restoring=true; render(); restoring=false; applyingRemote=false;
+    } else {                                                // tomt -> seed:a från lokalt schema
+      await pushCloud();
+    }
+    subscribeRealtime();
+    cloudReady=true;                 // FÖRST nu får lokala ändringar pushas till molnet
+    setCloudStatus("synced");
+  }catch(e){ setCloudStatus("offline"); console.warn("Moln-init misslyckades, kör lokalt:",e); }
+}
+
+/* ---------- Start ---------- */
+load(); render();
+if(CLOUD_ENABLED) initCloud(); else setCloudStatus("idle");
+</script>
+</body>
+</html>
