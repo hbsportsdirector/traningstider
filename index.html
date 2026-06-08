@@ -19,11 +19,12 @@
   header .sub{color:var(--muted);font-size:12px;}
   .cloud{font-weight:600;}
   .cloud.ok{color:var(--ok);} .cloud.busy{color:var(--warn);} .cloud.bad{color:var(--bad);} .cloud.idle{color:var(--muted);}
-  /* Vy-läge (?view): skrivskyddat */
-  .view .palette,.view .banner,.view .edit-only{display:none!important;}
-  .view .booking{cursor:default!important;}
-  .view .booking .x,.view .booking .rs{display:none!important;}
-  .viewbadge{font-weight:700;color:var(--accent);}
+  /* Skrivskyddat läge (ej upplåst): */
+  .locked .palette,.locked .banner,.locked .edit-only{display:none!important;}
+  .locked .booking{cursor:default!important;}
+  .locked .booking .x,.locked .booking .rs{display:none!important;}
+  .viewbadge{display:none;font-weight:600;color:var(--accent);}
+  .locked .viewbadge{display:inline;}
   .toolbar{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;}
   button.tool{background:#fff;border:1px solid var(--line);border-radius:7px;padding:6px 11px;
     font-size:13px;cursor:pointer;color:var(--ink);}
@@ -200,9 +201,11 @@
 <header>
   <div>
     <h1>Träningstider</h1>
-    <div class="sub">Klubbens veckoschema <span id="cloudStatus" class="cloud idle">· Lokalt läge</span></div>
+    <div class="sub">Klubbens veckoschema <span id="cloudStatus" class="cloud idle">· Lokalt läge</span><span class="viewbadge"> · 🔒 Skrivskyddad</span></div>
   </div>
   <div class="toolbar">
+    <button class="tool" id="unlockBtn" onclick="unlockEditing()">🔒 Lås upp redigering</button>
+    <button class="tool" id="lockBtn" onclick="lockEditing()" style="display:none">🔓 Lås</button>
     <button class="tool edit-only" id="undoBtn" onclick="undo()" title="Ångra (Ctrl+Z)" disabled>↶ Ångra</button>
     <button class="tool edit-only" id="redoBtn" onclick="redo()" title="Gör om (Ctrl+Shift+Z)" disabled>↷ Gör om</button>
     <button class="tool primary edit-only" onclick="openSettings('grupper')">⚙ Inställningar</button>
@@ -325,7 +328,9 @@ const SCHEDULE_ID="main";
 const CLOUD_ENABLED=!!(SUPABASE_URL && SUPABASE_KEY && window.supabase);
 let sb=CLOUD_ENABLED ? window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY) : null;
 let applyingRemote=false, cloudTimer=null, cloudReady=false;   // cloudReady: pusha INTE förrän molnet hämtats
-const VIEW_MODE = location.search.toLowerCase().includes("view");   // ?view = skrivskyddad vy
+const VIEW_MODE = location.search.toLowerCase().includes("view");   // ?view = ren tittarvy (döljer upplåsningsknappen)
+let unlocked=false, editPassword=null;                              // redigering kräver delat lösenord
+const SAVE_URL = SUPABASE_URL + "/functions/v1/save";              // lösenordsskyddad sparning (servern skriver)
 
 function defaultState(){
   return { bookings:exampleBookings(), teams:clone(DEFAULT_TEAMS), slotMin:15,
@@ -531,7 +536,7 @@ function renderDays(){
       const span=`grid-column:${hi+2};grid-row:${bk.start+2}/span ${bk.slots};`;
       const startM=START_MIN+bk.start*SLOT_MIN, endM=startM+bk.slots*SLOT_MIN;
       h+=`<div class="booking ${bk.type==='blocked'?'blocked':''} ${clash.has(bk.id)?'clash':''}"
-            draggable="${VIEW_MODE?'false':'true'}" style="${span}${style}"
+            draggable="${unlocked?'true':'false'}" style="${span}${style}"
             ondragstart="dragMove(event,'${bk.id}')"
             title="${esc(label)} ${fmt(startM)}–${fmt(endM)}">
             <span class="x" onclick="delBooking(event,'${bk.id}')">✕</span>
@@ -552,7 +557,7 @@ function renderBalance(){
     h+=`<div class="balrow">
           <span class="sw" style="background:${t.color}"></span>
           <span class="nm">${esc(t.name)}</span>
-          <span class="sched">${num(sched)}&nbsp;/&nbsp;${VIEW_MODE?num(t.target):`<input class="tgt" type="number" min="0" step="0.25" value="${t.target}" onchange="setTeamTarget(${i},this.value)">`}</span>
+          <span class="sched">${num(sched)}&nbsp;/&nbsp;${unlocked?`<input class="tgt" type="number" min="0" step="0.25" value="${t.target}" onchange="setTeamTarget(${i},this.value)">`:num(t.target)}</span>
           <span class="diff ${st}">${dtxt}</span>
         </div>`;
   });
@@ -647,7 +652,7 @@ function updateUndoButtons(){
 
 /* ---------- Inställningar ---------- */
 let settingsTab="grupper";
-function openSettings(tab){ if(VIEW_MODE) return; if(tab) settingsTab=tab; document.getElementById("settings").style.display="flex"; renderSettings(); }
+function openSettings(tab){ if(!unlocked) return; if(tab) settingsTab=tab; document.getElementById("settings").style.display="flex"; renderSettings(); }
 function closeSettings(){ document.getElementById("settings").style.display="none"; }
 function setTab(t){ settingsTab=t; renderSettings(); }
 
@@ -945,13 +950,36 @@ function setCloudStatus(s){
     synced:["· ✓ Synkad","ok"], saving:["· Sparar…","busy"], offline:["· ⚠ Offline (sparat lokalt)","bad"] };
   const v=map[s]||["",""]; e.textContent=v[0]; e.className="cloud "+v[1];
 }
+
+/* ---------- Lås upp / lås redigering (delat lösenord) ---------- */
+function applyMode(){
+  document.body.classList.toggle("locked", !unlocked);
+  const ub=document.getElementById("unlockBtn"), lb=document.getElementById("lockBtn");
+  if(ub) ub.style.display=(!unlocked && !VIEW_MODE)?"":"none";
+  if(lb) lb.style.display=unlocked?"":"none";
+}
+async function unlockEditing(pwArg){
+  const pw=pwArg || prompt("Ange redigeringslösenord:");
+  if(!pw) return;
+  try{
+    const r=await fetch(SAVE_URL,{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({password:pw,verify:true})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok && d.ok){ unlocked=true; editPassword=pw; try{localStorage.setItem("ts_edit_pw",pw);}catch(e){}
+      applyMode(); render(); toast("Upplåst – du kan redigera"); }
+    else { toast("Fel lösenord"); }
+  }catch(e){ toast("Kunde inte verifiera lösenordet"); }
+}
+function lockEditing(){ unlocked=false; editPassword=null; try{localStorage.removeItem("ts_edit_pw");}catch(e){}
+  applyMode(); render(); toast("Låst (skrivskyddat)"); }
 async function pushCloud(){
-  if(!sb || VIEW_MODE) return;   // vy-läge skriver aldrig till molnet
+  if(!sb || !unlocked || !editPassword) return;   // skriver bara när upplåst med rätt lösenord
   setCloudStatus("saving");
   try{
-    const {error}=await sb.from("traningstider_schema")
-      .upsert({id:SCHEDULE_ID,data:state,updated_at:new Date().toISOString()},{onConflict:"id"});
-    if(error) throw error;
+    const r=await fetch(SAVE_URL,{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({password:editPassword,data:state})});
+    if(r.status===403){ setCloudStatus("offline"); lockEditing(); toast("Fel lösenord – låst igen"); return; }
+    if(!r.ok) throw new Error("status "+r.status);
     setCloudStatus("synced");
   }catch(e){ setCloudStatus("offline"); console.warn("Moln-spar misslyckades:",e); }
 }
@@ -985,11 +1013,8 @@ async function initCloud(){
 }
 
 /* ---------- Start ---------- */
-if(VIEW_MODE){
-  document.body.classList.add("view");
-  const s=document.querySelector("header .sub");
-  if(s) s.insertAdjacentHTML("beforeend", ' · <span class="viewbadge">👁 Vy-läge (skrivskyddat)</span>');
-}
+try{ const pw=localStorage.getItem("ts_edit_pw"); if(pw && !VIEW_MODE){ unlocked=true; editPassword=pw; } }catch(e){}
+applyMode();
 load(); render();
 if(CLOUD_ENABLED) initCloud(); else setCloudStatus("idle");
 </script>
