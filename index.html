@@ -331,6 +331,12 @@ let applyingRemote=false, cloudTimer=null, cloudReady=false;   // cloudReady: pu
 const VIEW_MODE = location.search.toLowerCase().includes("view");   // ?view = ren tittarvy (döljer upplåsningsknappen)
 let unlocked=false, editPassword=null;                              // redigering kräver delat lösenord
 const SAVE_URL = SUPABASE_URL + "/functions/v1/save";              // lösenordsskyddad sparning (servern skriver)
+let sentStates=[];                                                 // kanoniska strängar av egna sparningar (ignorera egna realtime-eko)
+function canon(x){                                                 // ordningsoberoende JSON (jsonb omordnar nycklar)
+  if(Array.isArray(x)) return "["+x.map(canon).join(",")+"]";
+  if(x && typeof x==="object") return "{"+Object.keys(x).sort().map(k=>JSON.stringify(k)+":"+canon(x[k])).join(",")+"}";
+  return JSON.stringify(x);
+}
 
 function defaultState(){
   return { bookings:exampleBookings(), teams:clone(DEFAULT_TEAMS), slotMin:15,
@@ -974,6 +980,7 @@ function lockEditing(){ unlocked=false; editPassword=null; try{localStorage.remo
   applyMode(); render(); toast("Låst (skrivskyddat)"); }
 async function pushCloud(){
   if(!sb || !unlocked || !editPassword) return;   // skriver bara när upplåst med rätt lösenord
+  sentStates.push(canon(state)); if(sentStates.length>20) sentStates.shift();   // kom ihåg egen sparning
   setCloudStatus("saving");
   try{
     const r=await fetch(SAVE_URL,{method:"POST",headers:{"content-type":"application/json"},
@@ -989,7 +996,10 @@ function subscribeRealtime(){
         {event:"*",schema:"public",table:"traningstider_schema",filter:"id=eq."+SCHEDULE_ID},
         payload=>{
           const incoming=payload.new && payload.new.data; if(!incoming) return;
-          if(JSON.stringify(incoming)===JSON.stringify(state)) return;   // vår egen ändring – hoppa
+          const ic=canon(incoming);
+          if(ic===canon(state)) return;                       // identiskt med det vi redan visar
+          const k=sentStates.indexOf(ic);
+          if(k>=0){ sentStates.splice(k,1); return; }         // vår EGEN sparning (jsonb omordnade nycklar) – ingen toast
           applyingRemote=true; state=incoming; migrate(); restoring=true; render(); restoring=false; applyingRemote=false;
           setCloudStatus("synced"); toast("Schemat uppdaterades av någon annan");
         })
