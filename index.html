@@ -176,7 +176,7 @@
   .printhead h2{margin:0;font-size:20px;}
   .printhead .pd{font-size:12px;color:#444;margin-top:3px;}
   /* Utskriftsvy: hela veckan i ETT rutnät (dagar sida vid sida, som Excel) */
-  .pgrid{border-collapse:collapse;width:100%;table-layout:fixed;font-size:8.5px;}
+  .pgrid{border-collapse:collapse;width:100%;table-layout:fixed;font-size:8.5px;margin-bottom:14px;}
   .pgrid th,.pgrid td{border:1px solid #999;padding:1px 2px;text-align:center;overflow:hidden;}
   .pgrid .tcol,.pgrid .tcell{width:32px;font-size:7px;color:#333;background:#f3f3f3;white-space:nowrap;}
   .pgrid .dayh{background:#e3e9ef;font-size:10px;text-transform:uppercase;}
@@ -614,38 +614,42 @@ function renderPrint(){
 }
 function printGridHTML(){
   const clash=findClashes();
-  const cols=[]; state.days.forEach(d=>hallsForDay(d).forEach(h=>cols.push({day:d,hall:h})));
-  if(!cols.length) return '<p class="hint">Inga hallar/dagar att visa.</p>';
-  let h='<table class="pgrid"><thead><tr><th class="tcol" rowspan="2">Tid</th>';
-  state.days.forEach(d=>{ const n=hallsForDay(d).length; if(n) h+=`<th class="dayh" colspan="${n}">${esc(d)}</th>`; });
-  h+='</tr><tr>';
-  cols.forEach(c=>h+=`<th class="hallh">${esc(c.hall)}</th>`);
-  h+='</tr></thead><tbody>';
-  // Gemensamt tidsintervall (union) över alla aktiva dagar – dagar kan ha olika tider
-  const actDays=[...new Set(cols.map(c=>c.day))];
-  const uStart=Math.min(...actDays.map(dayStart)), uEnd=Math.max(...actDays.map(dayEnd));
-  const uRows=(uEnd-uStart)/SLOT_MIN;
-  const skip=new Array(cols.length).fill(0);          // antal rader varje kolumn är "täckt" av ett rowspan ovan
-  for(let s=0;s<uRows;s++){
-    const absMin=uStart+s*SLOT_MIN;
-    h+=`<tr><td class="tcell">${absMin%30===0?fmt(absMin):''}</td>`;
-    cols.forEach((c,ci)=>{
-      if(skip[ci]>0){ skip[ci]--; return; }
-      if(absMin<dayStart(c.day) || absMin>=dayEnd(c.day)){ h+='<td class="pcell pout"></td>'; return; }   // utanför dagens tider
-      const ls=(absMin-dayStart(c.day))/SLOT_MIN;     // lokal slot-index för dagen
-      const bk=state.bookings.find(x=>x.day===c.day && x.hall===c.hall && x.start===ls);
-      if(!bk){ h+='<td class="pcell"></td>'; return; }
-      const t=bk.type==='team'?teamById(bk.team):null;
-      if(bk.type==='team' && !t){ h+='<td class="pcell"></td>'; return; }
-      const style=t?`background:${t.color};color:${t.text};`:'';
-      const label=t?esc(t.name):'Upptaget';
-      const cls='pcell'+(bk.type==='blocked'?' pblock':'')+(clash.has(bk.id)?' pclash':'');
-      h+=`<td class="${cls}" rowspan="${bk.slots}" style="${style}">${label}</td>`;
-      skip[ci]=bk.slots-1;
-    });
-    h+='</tr>';
-  }
-  return h+'</tbody></table>';
+  const active=state.days.filter(d=>hallsForDay(d).length>0);
+  if(!active.length) return '<p class="hint">Inga hallar/dagar att visa.</p>';
+  // Gruppera dagar efter tidsspann → varje grupp blir ett eget rutnät med BARA sina tider
+  const groups=[];
+  active.forEach(d=>{ const s=dayStart(d), e=dayEnd(d);
+    let g=groups.find(g=>g.s===s && g.e===e); if(!g){ g={s,e,days:[]}; groups.push(g); } g.days.push(d); });
+  let out='';
+  groups.forEach(g=>{
+    const cols=[]; g.days.forEach(d=>hallsForDay(d).forEach(h=>cols.push({day:d,hall:h})));
+    const rows=(g.e-g.s)/SLOT_MIN;
+    let h='<table class="pgrid"><thead><tr><th class="tcol" rowspan="2">Tid</th>';
+    g.days.forEach(d=>{ const n=hallsForDay(d).length; if(n) h+=`<th class="dayh" colspan="${n}">${esc(d)}</th>`; });
+    h+='</tr><tr>';
+    cols.forEach(c=>h+=`<th class="hallh">${esc(c.hall)}</th>`);
+    h+='</tr></thead><tbody>';
+    const skip=new Array(cols.length).fill(0);
+    for(let s=0;s<rows;s++){
+      const tm=g.s+s*SLOT_MIN;
+      h+=`<tr><td class="tcell">${tm%30===0?fmt(tm):''}</td>`;
+      cols.forEach((c,ci)=>{
+        if(skip[ci]>0){ skip[ci]--; return; }
+        const bk=state.bookings.find(x=>x.day===c.day && x.hall===c.hall && x.start===s);
+        if(!bk){ h+='<td class="pcell"></td>'; return; }
+        const t=bk.type==='team'?teamById(bk.team):null;
+        if(bk.type==='team' && !t){ h+='<td class="pcell"></td>'; return; }
+        const style=t?`background:${t.color};color:${t.text};`:'';
+        const label=t?esc(t.name):'Upptaget';
+        const cls='pcell'+(bk.type==='blocked'?' pblock':'')+(clash.has(bk.id)?' pclash':'');
+        h+=`<td class="${cls}" rowspan="${bk.slots}" style="${style}">${label}</td>`;
+        skip[ci]=bk.slots-1;
+      });
+      h+='</tr>';
+    }
+    out += h+'</tbody></table>';
+  });
+  return out;
 }
 function printBalanceHTML(){
   const c=teamHours();
