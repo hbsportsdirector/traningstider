@@ -87,6 +87,20 @@
     padding:4px 5px 4px 12px;font-size:13px;background:#fafbfc;font-weight:600;}
   .catchip button{border:none;background:rgba(0,0,0,.12);color:#333;border-radius:50%;width:18px;height:18px;
     cursor:pointer;font-size:11px;line-height:18px;padding:0;}
+  /* Vy-växel: Veckoschema / Lag-scheman */
+  .viewswitch{display:flex;gap:6px;margin-bottom:12px;}
+  .vsw{background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;color:var(--muted);}
+  .vsw:hover{background:#f0f3f7;} .vsw.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+  #teamview{display:none;flex-direction:column;gap:12px;}
+  .view-lag #teamview{display:flex;}
+  .view-lag #days,.view-lag #catTabs{display:none;}
+  .teamcard{background:var(--panel);border:1px solid var(--line);border-radius:11px;overflow:hidden;break-inside:avoid;}
+  .teamcard h3{margin:0;padding:8px 14px;font-size:15px;}
+  .teamtbl{width:100%;border-collapse:collapse;font-size:13px;}
+  .teamtbl td,.teamtbl th{border-top:1px solid #eef1f4;padding:5px 14px;text-align:left;}
+  .teamtbl th{background:#f7f9fb;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;}
+  .teamtbl td.day{font-weight:600;width:34%;}
+  .teamempty{padding:8px 14px;color:var(--muted);font-size:13px;}
 
   .booking{position:relative;margin:1px;border-radius:6px;z-index:2;cursor:grab;overflow:hidden;
     display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;
@@ -190,7 +204,10 @@
   .pbal .psw{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:-1px;margin-right:3px;}
   @media print{
     @page{ size:A4 landscape; margin:8mm; }
-    header,.palette,.banner,.summary,.toolbar,.legend,#days,.side,.booking .x,.booking .rs{display:none!important;}
+    header,.palette,.banner,.summary,.toolbar,.legend,.viewswitch,#days,.side,.booking .x,.booking .rs{display:none!important;}
+    .view-lag #printgrid,.view-lag #printbalance{display:none!important;}
+    .view-lag #teamview{display:block;column-count:2;column-gap:12px;}
+    .teamcard{margin-bottom:10px;}
     .wrap{padding:0;display:block;} body{background:#fff;}
     .printonly{display:block!important;}
     .printhead{padding-bottom:6px;border-bottom:2px solid #333;margin-bottom:8px;}
@@ -231,8 +248,13 @@
       <button onclick="this.parentNode.style.display='none'">✕</button>
     </div>
     <div class="summary" id="summary"></div>
+    <div class="viewswitch">
+      <button class="vsw on" id="vswVecka" onclick="setMainView('vecka')">📅 Veckoschema</button>
+      <button class="vsw" id="vswLag" onclick="setMainView('lag')">👥 Lag-scheman</button>
+    </div>
     <div class="cattabs" id="catTabs"></div>
     <div id="days"></div>
+    <div id="teamview"></div>
     <div class="printonly" id="printgrid"></div>
     <div class="printonly" id="printbalance"></div>
   </div>
@@ -490,7 +512,7 @@ function findClashes(){
 
 /* ---------- Rendering ---------- */
 function render(){
-  renderPalette(); renderCatTabs(); renderDays(); renderBalance(); renderSummary(); renderPrint(); save();
+  renderPalette(); renderCatTabs(); renderDays(); renderTeamView(); renderBalance(); renderSummary(); renderPrint(); save();
   const sm=document.getElementById("settings"); if(sm && sm.style.display==="flex") renderSettings();
   updateUndoButtons();
 }
@@ -605,6 +627,37 @@ function renderCatTabs(){
   el.innerHTML=h;
 }
 function setSchedCat(i){ scheduleCat=(i<0)?"__all__":(state.categories[i]||"__all__"); render(); }
+
+/* ---------- Vy: Veckoschema / Lag-scheman ---------- */
+let mainView="vecka";
+function setMainView(v){ mainView=v; applyView(); render(); }
+function applyView(){
+  document.body.classList.toggle("view-lag", mainView==="lag");
+  const a=document.getElementById("vswVecka"), b=document.getElementById("vswLag");
+  if(a) a.className="vsw"+(mainView==="vecka"?" on":"");
+  if(b) b.className="vsw"+(mainView==="lag"?" on":"");
+  const pt=document.querySelector(".printhead h2"); if(pt) pt.textContent="Träningstider – "+(mainView==="lag"?"lag-scheman":"veckoschema");
+}
+function renderTeamView(){
+  const el=document.getElementById("teamview"); if(!el) return;
+  const hrs=teamHours();
+  const dayIdx=d=>{ const i=state.days.indexOf(d); return i<0?99:i; };
+  let h="";
+  state.teams.forEach(t=>{
+    const sess=state.bookings.filter(b=>b.type==="team" && b.team===t.id).map(b=>{
+      const s=dayStart(b.day)+b.start*SLOT_MIN; return {day:b.day,di:dayIdx(b.day),s,e:s+b.slots*SLOT_MIN,hall:b.hall};
+    }).sort((x,y)=> x.di-y.di || x.s-y.s);
+    h+=`<div class="teamcard"><h3 style="background:${t.color};color:${t.text}">${esc(t.name)} <span style="font-weight:400;opacity:.85;font-size:12px">· ${num(hrs[t.id])} / ${num(t.target)} h</span></h3>`;
+    if(!sess.length) h+='<div class="teamempty">Inga pass inlagda.</div>';
+    else {
+      h+='<table class="teamtbl"><thead><tr><th>Dag</th><th>Tid</th><th>Hall</th></tr></thead><tbody>';
+      sess.forEach(x=>{ h+=`<tr><td class="day">${x.day}</td><td>${fmt(x.s)}–${fmt(x.e)}</td><td>${esc(x.hall)}</td></tr>`; });
+      h+='</tbody></table>';
+    }
+    h+='</div>';
+  });
+  el.innerHTML=h;
+}
 
 /* ---------- Utskriftsvy: hela veckan i ETT rutnät (för PDF på en sida) ---------- */
 function renderPrint(){
@@ -1059,6 +1112,7 @@ async function initCloud(){
 /* ---------- Start ---------- */
 try{ const pw=localStorage.getItem("ts_edit_pw"); if(pw && !VIEW_MODE){ unlocked=true; editPassword=pw; } }catch(e){}
 applyMode();
+applyView();
 load(); render();
 if(CLOUD_ENABLED) initCloud(); else setCloudStatus("idle");
 </script>
