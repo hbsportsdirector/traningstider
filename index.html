@@ -138,6 +138,10 @@
   .dtog{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;
     padding:6px 10px;font-size:13px;cursor:pointer;background:#fafbfc;}
   .dtog.on{background:#e8f0fe;border-color:#9db8f0;color:#1b3a8a;font-weight:600;}
+  .daytimes{display:flex;flex-direction:column;gap:5px;}
+  .dayrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .dayrow .dtog{min-width:118px;}
+  .dtime input[type=time]{border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:13px;}
   .mscroll{overflow-x:auto;}
   .hallmatrix{border-collapse:collapse;width:100%;font-size:13px;}
   .hallmatrix th,.hallmatrix td{border:1px solid var(--line);padding:5px 7px;}
@@ -179,6 +183,7 @@
   .pgrid .hallh{background:#f1f5f8;font-size:7.5px;font-weight:600;}
   .pgrid .pcell{height:13px;}
   .pgrid td.pblock{background:repeating-linear-gradient(45deg,#bdbdbd,#bdbdbd 4px,#a9a9a9 4px,#a9a9a9 8px);color:#fff;font-size:6.5px;}
+  .pgrid td.pout{background:#efefef;}
   .pgrid td.pclash{outline:2px solid #c62828;outline-offset:-2px;}
   .pbal{margin-top:9px;font-size:9px;line-height:1.8;}
   .pbal .pbi{display:inline-block;margin-right:9px;white-space:nowrap;}
@@ -262,8 +267,7 @@
 
 <script>
 /* ---------- Konfiguration ---------- */
-const SLOT_MIN=15, START_MIN=16*60+30, END_MIN=22*60;
-const N_SLOTS=(END_MIN-START_MIN)/SLOT_MIN;            // 11 pass à 30 min
+const SLOT_MIN=15, DEF_START=16*60+30, DEF_END=22*60;   // standardtider (vardag); kan ändras per dag
 const DEFAULT_DAYS=["Måndag","Tisdag","Onsdag","Torsdag","Fredag"];
 const ALL_WEEKDAYS=["Måndag","Tisdag","Onsdag","Torsdag","Fredag","Lördag","Söndag"];
 const DEFAULT_HALLS=["Tibble CC","Gym","Ängsholmen","Vallentuna"];
@@ -341,7 +345,7 @@ function canon(x){                                                 // ordningsob
 function defaultState(){
   return { bookings:exampleBookings(), teams:clone(DEFAULT_TEAMS), slotMin:15,
            days:[...DEFAULT_DAYS], halls:[...DEFAULT_HALLS], hallsByDay:clone(DEFAULT_HALLS_BY_DAY),
-           categories:[], hallCat:{} };
+           categories:[], hallCat:{}, dayTimes:{} };
 }
 function migrate(){
   const hadTeams=Array.isArray(state.teams);
@@ -360,6 +364,7 @@ function migrate(){
   }
   if(!state.categories) state.categories=[];
   if(!state.hallCat) state.hallCat={};
+  if(!state.dayTimes) state.dayTimes={};
   // Engångskonvertering: gammal 30-min-data -> 15-min-bas (bevarar exakta tider)
   if(needsSlotConv){
     (state.bookings||[]).forEach(b=>{ b.start*=2; b.slots*=2; });
@@ -425,8 +430,14 @@ function backupsListHTML(){
 /* ---------- Hjälpfunktioner ---------- */
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function fmt(m){ return Math.floor(m/60)+"."+String(m%60).padStart(2,"0"); }
-function slotLabel(i){ return fmt(START_MIN+i*SLOT_MIN); }                  // starttid för raden
-function onHalfHour(i){ return (START_MIN+i*SLOT_MIN)%30===0; }             // glesa ut etiketter (var 30:e min)
+function hm(m){ return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0"); }   // för <input type=time> "16:30"
+function parseHm(s){ const x=/^(\d{1,2}):(\d{2})$/.exec(s||""); return x?(+x[1])*60+(+x[2]):null; }
+// Tidsspann per dag (start/slut i minuter). Helger får bredare standard. Egna värden i state.dayTimes.
+function defWindow(day){ return (day==="Lördag"||day==="Söndag")?{start:8*60,end:22*60}:{start:DEF_START,end:DEF_END}; }
+function dayWindow(day){ const o=(state.dayTimes||{})[day]; return o?{start:o.start,end:o.end}:defWindow(day); }
+function dayStart(day){ return dayWindow(day).start; }
+function dayEnd(day){ return dayWindow(day).end; }
+function daySlots(day){ return Math.max(1,(dayEnd(day)-dayStart(day))/SLOT_MIN); }
 function overlaps(aS,aL,bS,bL){ return aS<bS+bL && bS<aS+aL; }
 let scheduleCat="__all__";   // vald hall-kategori-flik i schemavyn (personlig, ej synkad)
 function hallsForDay(day){
@@ -449,7 +460,7 @@ function confirmDelete(thing,count){ return confirm(`Ta bort ${thing}${count?` o
 // Lediga pass framåt från "start" i en hall/dag (exkl. ett visst boknings-id)
 function freeAhead(day,hall,start,excludeId){
   let k=0;
-  while(start+k<N_SLOTS){
+  while(start+k<daySlots(day)){
     const s=start+k;
     const occupied=state.bookings.some(bk=>bk.id!==excludeId && bk.day===day && bk.hall===hall
                        && s>=bk.start && s<bk.start+bk.slots);
@@ -459,7 +470,7 @@ function freeAhead(day,hall,start,excludeId){
   return k;
 }
 function fits(day,hall,start,slots,excludeId){
-  if(start<0||start+slots>N_SLOTS) return false;
+  if(start<0||start+slots>daySlots(day)) return false;
   return !state.bookings.some(bk=>bk.id!==excludeId && bk.day===day && bk.hall===hall
             && overlaps(start,slots,bk.start,bk.slots));
 }
@@ -512,6 +523,7 @@ function renderDays(){
   let h="";
   state.days.forEach(day=>{
     const halls=hallsForDay(day);
+    const ds=dayStart(day), nslots=daySlots(day);
     if(halls.length===0){
       const msg = scheduleCat==='__all__'
         ? `Inga hallar valda för ${day}. Öppna <b>⚙ Inställningar</b> för att välja hallar.`
@@ -521,11 +533,12 @@ function renderDays(){
     }
     h+=`<div class="day"><h2>${day}</h2><div class="gridscroll"><div class="grid"
          style="grid-template-columns:74px repeat(${halls.length},minmax(96px,1fr));
-                grid-template-rows:var(--headH) repeat(${N_SLOTS},var(--rowH));">`;
+                grid-template-rows:var(--headH) repeat(${nslots},var(--rowH));">`;
     h+=`<div class="corner"></div>`;
     halls.forEach(hl=>h+=`<div class="ghead">${esc(hl)}</div>`);
-    for(let s=0;s<N_SLOTS;s++){
-      h+=`<div class="tlabel" style="grid-column:1;grid-row:${s+2}">${onHalfHour(s)?slotLabel(s):''}</div>`;
+    for(let s=0;s<nslots;s++){
+      const tm=ds+s*SLOT_MIN;
+      h+=`<div class="tlabel" style="grid-column:1;grid-row:${s+2}">${tm%30===0?fmt(tm):''}</div>`;
       halls.forEach((hl,hi)=>{
         h+=`<div class="cell" data-day="${esc(day)}" data-hall="${esc(hl)}" data-slot="${s}"
               style="grid-column:${hi+2};grid-row:${s+2}"
@@ -540,7 +553,7 @@ function renderDays(){
       const style=t?`background:${t.color};color:${t.text};`:"";
       const label=t?t.name:"Upptaget";
       const span=`grid-column:${hi+2};grid-row:${bk.start+2}/span ${bk.slots};`;
-      const startM=START_MIN+bk.start*SLOT_MIN, endM=startM+bk.slots*SLOT_MIN;
+      const startM=ds+bk.start*SLOT_MIN, endM=startM+bk.slots*SLOT_MIN;
       h+=`<div class="booking ${bk.type==='blocked'?'blocked':''} ${clash.has(bk.id)?'clash':''}"
             draggable="${unlocked?'true':'false'}" style="${span}${style}"
             ondragstart="dragMove(event,'${bk.id}')"
@@ -608,12 +621,19 @@ function printGridHTML(){
   h+='</tr><tr>';
   cols.forEach(c=>h+=`<th class="hallh">${esc(c.hall)}</th>`);
   h+='</tr></thead><tbody>';
+  // Gemensamt tidsintervall (union) över alla aktiva dagar – dagar kan ha olika tider
+  const actDays=[...new Set(cols.map(c=>c.day))];
+  const uStart=Math.min(...actDays.map(dayStart)), uEnd=Math.max(...actDays.map(dayEnd));
+  const uRows=(uEnd-uStart)/SLOT_MIN;
   const skip=new Array(cols.length).fill(0);          // antal rader varje kolumn är "täckt" av ett rowspan ovan
-  for(let s=0;s<N_SLOTS;s++){
-    h+=`<tr><td class="tcell">${onHalfHour(s)?slotLabel(s):''}</td>`;
+  for(let s=0;s<uRows;s++){
+    const absMin=uStart+s*SLOT_MIN;
+    h+=`<tr><td class="tcell">${absMin%30===0?fmt(absMin):''}</td>`;
     cols.forEach((c,ci)=>{
       if(skip[ci]>0){ skip[ci]--; return; }
-      const bk=state.bookings.find(x=>x.day===c.day && x.hall===c.hall && x.start===s);
+      if(absMin<dayStart(c.day) || absMin>=dayEnd(c.day)){ h+='<td class="pcell pout"></td>'; return; }   // utanför dagens tider
+      const ls=(absMin-dayStart(c.day))/SLOT_MIN;     // lokal slot-index för dagen
+      const bk=state.bookings.find(x=>x.day===c.day && x.hall===c.hall && x.start===ls);
       if(!bk){ h+='<td class="pcell"></td>'; return; }
       const t=bk.type==='team'?teamById(bk.team):null;
       if(bk.type==='team' && !t){ h+='<td class="pcell"></td>'; return; }
@@ -698,10 +718,12 @@ function groupsTabHTML(){
 }
 
 function hallsTabHTML(){
-  let h='<h4>Träningsdagar</h4><div class="daytoggles">';
+  let h='<h4>Träningsdagar <span style="font-weight:400;color:var(--muted)">· egna tider per dag</span></h4><div class="daytimes">';
   ALL_WEEKDAYS.forEach((d,wi)=>{
     const on=state.days.includes(d);
-    h+=`<label class="dtog ${on?'on':''}"><input type="checkbox" ${on?'checked':''} onchange="toggleDay(${wi})"> ${d}</label>`;
+    h+=`<div class="dayrow"><label class="dtog ${on?'on':''}"><input type="checkbox" ${on?'checked':''} onchange="toggleDay(${wi})"> ${d}</label>`;
+    if(on) h+=`<span class="dtime"><input type="time" step="900" value="${hm(dayStart(d))}" onchange="setDayTime('${d}','start',this.value)"> – <input type="time" step="900" value="${hm(dayEnd(d))}" onchange="setDayTime('${d}','end',this.value)"></span>`;
+    h+='</div>';
   });
   h+='</div>';
   h+='<h4>Hall-kategorier <span style="font-weight:400;color:var(--muted)">(blir flikar i schemat)</span></h4>';
@@ -773,6 +795,14 @@ function toggleDay(wi){
     state.days=ALL_WEEKDAYS.filter(x=>state.days.includes(x)||x===d);
     if(!state.hallsByDay[d]) state.hallsByDay[d]=[...state.halls];
   }
+  render();
+}
+function setDayTime(day,which,val){
+  const m=parseHm(val); if(m==null){ render(); return; }
+  const w=dayWindow(day), nw={start:w.start,end:w.end};
+  nw[which]=Math.round(m/SLOT_MIN)*SLOT_MIN;
+  if(nw.end<=nw.start){ toast("Sluttiden måste vara efter starttiden"); render(); return; }
+  state.dayTimes=state.dayTimes||{}; state.dayTimes[day]=nw;
   render();
 }
 function addHall(){
@@ -879,7 +909,7 @@ function onResize(e){
   let n=Math.max(1,Math.min(resizing.orig+d,resizing.maxLen));
   if(n!==resizing.bk.slots){ resizing.bk.slots=n;
     resizing.block.style.gridRow=`${resizing.bk.start+2}/span ${n}`;
-    const sM=START_MIN+resizing.bk.start*SLOT_MIN;
+    const sM=dayStart(resizing.bk.day)+resizing.bk.start*SLOT_MIN;
     resizing.block.querySelector(".t").textContent=fmt(sM)+"–"+fmt(sM+n*SLOT_MIN);
   }
 }
