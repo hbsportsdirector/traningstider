@@ -218,6 +218,8 @@
   @media(max-width:980px){ .wrap{flex-direction:column;} .side{position:static;flex-basis:auto;width:100%;} }
   /* Touch: markerad grupp, tryck-hint och pass-meny */
   .chip.sel{outline:3px solid var(--accent);outline-offset:1px;}
+  #days.focusing .booking{opacity:.28;filter:grayscale(.7);}
+  #days.focusing .booking.foc{opacity:1;filter:none;box-shadow:0 0 0 2px rgba(17,24,39,.55);z-index:4;}
   .taphint{position:fixed;left:0;right:0;bottom:0;z-index:120;background:#1f2933;color:#fff;padding:11px 14px;
     font-size:14px;display:none;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;}
   .taphint button{background:#fff;color:#1f2933;border:none;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer;}
@@ -556,16 +558,16 @@ function num(n){ return (Math.round(n*100)/100).toString().replace(".",","); }  
 
 function renderPalette(){
   const c=passCounts(), el=document.getElementById("palette");
-  let h='<span class="ptitle">Dra eller tryck på en grupp ▸</span>';
+  let h='<span class="ptitle">Dra ut · tryck för att markera/filtrera ▸</span>';
   state.teams.forEach(t=>{
     const st=statusOf(c[t.id],t.target);
-    h+=`<div class="chip ${selectedTeam===t.id?'sel':''}" draggable="true" ondragstart="dragNew(event,'${t.id}')" onclick="selectTeam('${t.id}')">
+    h+=`<div class="chip ${focus.has(t.id)?'sel':''}" draggable="true" ondragstart="dragNew(event,'${t.id}')" onclick="toggleFocus('${t.id}')">
           <span class="sw" style="background:${t.color}"></span>
           <span class="nm">${esc(t.name)}</span>
           <span class="cnt ${st}">${c[t.id]}/${t.target}</span>
         </div>`;
   });
-  h+=`<div class="chip blocked ${selectedTeam==='__blocked__'?'sel':''}" draggable="true" ondragstart="dragNew(event,'__blocked__')" onclick="selectTeam('__blocked__')">
+  h+=`<div class="chip blocked ${focus.has('__blocked__')?'sel':''}" draggable="true" ondragstart="dragNew(event,'__blocked__')" onclick="toggleFocus('__blocked__')">
         <span class="sw" style="background:#9aa3ab"></span><span class="nm">Upptaget</span>
       </div>`;
   el.innerHTML=h;
@@ -607,7 +609,8 @@ function renderDays(){
       const label=t?t.name:"Upptaget";
       const span=`grid-column:${hi+2};grid-row:${bk.start+2}/span ${bk.slots};`;
       const startM=ds+bk.start*SLOT_MIN, endM=startM+bk.slots*SLOT_MIN;
-      h+=`<div class="booking ${bk.type==='blocked'?'blocked':''} ${clash.has(bk.id)?'clash':''}"
+      const foc=(bk.type==="team"&&focus.has(bk.team))||(bk.type==="blocked"&&focus.has("__blocked__"));
+      h+=`<div class="booking ${bk.type==='blocked'?'blocked':''} ${clash.has(bk.id)?'clash':''} ${foc?'foc':''}"
             draggable="${unlocked?'true':'false'}" style="${span}${style}"
             ondragstart="dragMove(event,'${bk.id}')" onclick="bookingTap(event,'${bk.id}')"
             title="${esc(label)} ${fmt(startM)}–${fmt(endM)}">
@@ -618,7 +621,9 @@ function renderDays(){
     });
     h+="</div></div></div>";
   });
-  document.getElementById("days").innerHTML=h;
+  const daysEl=document.getElementById("days");
+  daysEl.innerHTML=h;
+  daysEl.classList.toggle("focusing", focus.size>0);
 }
 
 function renderBalance(){
@@ -955,7 +960,8 @@ function setHallCat(hi,val){
 
 /* ---------- Interaktion: drag & släpp ---------- */
 let dragData=null;
-let selectedTeam=null, movingId=null, bmBooking=null;   // touch: tryck-för-att-placera / pass-meny
+let focus=new Set(), movingId=null, bmBooking=null;   // markerade lag (fokus/filter) + pass-meny
+const TOUCH=!!(window.matchMedia && window.matchMedia("(pointer:coarse)").matches);   // touch-enhet?
 function dragNew(e,team){ dragData={kind:"new",team}; e.dataTransfer.effectAllowed="copy"; }
 function dragMove(e,id){ dragData={kind:"move",id}; e.dataTransfer.effectAllowed="move"; }
 function cellOver(e,cell){ if(!dragData)return; e.preventDefault(); cell.classList.add("over"); }
@@ -980,33 +986,35 @@ function cellDrop(e,cell){
 }
 function delBooking(e,id){ e.stopPropagation(); state.bookings=state.bookings.filter(b=>b.id!==id); render(); }
 
-/* ---------- Touch: tryck för att placera / redigera ---------- */
-function selectTeam(id){ if(!unlocked) return; selectedTeam=(selectedTeam===id)?null:id; movingId=null; renderPalette(); updateTapHint(); }
-function cancelTap(){ selectedTeam=null; movingId=null; renderPalette(); updateTapHint(); }
-function updateTapHint(){
+/* ---------- Markera/filtrera lag (fokus) + touch-redigering ---------- */
+function toggleFocus(id){ if(focus.has(id)) focus.delete(id); else focus.add(id); movingId=null; render(); updateFocusHint(); }
+function clearFocus(){ focus.clear(); movingId=null; render(); updateFocusHint(); }
+function cancelMove(){ movingId=null; updateFocusHint(); }
+function updateFocusHint(){
   const el=document.getElementById("taphint"); if(!el) return;
   let msg="";
-  if(movingId){ msg='↕ Tryck på en ny ledig tid för att flytta passet. &nbsp;<button onclick="cancelTap()">Avbryt</button>'; }
-  else if(selectedTeam){ const t=selectedTeam==="__blocked__"?{name:"Upptaget"}:teamById(selectedTeam);
-    msg='👆 Tryck på en ledig tid för <b>'+(t?esc(t.name):"")+'</b> &nbsp;<button onclick="cancelTap()">Klar</button>'; }
+  if(movingId){ msg='↕ Tryck på en ny ledig tid för att flytta passet. &nbsp;<button onclick="cancelMove()">Avbryt</button>'; }
+  else if(focus.size===1){ const id=[...focus][0]; const t=id==="__blocked__"?{name:"Upptaget"}:teamById(id);
+    msg='👁 <b>'+(t?esc(t.name):"")+'</b> markerat – övriga nedtonade.'+((TOUCH&&unlocked)?' Tryck på en ledig tid för att lägga till.':'')+' &nbsp;<button onclick="clearFocus()">Rensa</button>'; }
+  else if(focus.size>1){ msg='👁 Visar <b>'+focus.size+' lag</b> – övriga nedtonade. &nbsp;<button onclick="clearFocus()">Rensa</button>'; }
   el.innerHTML=msg; el.style.display=msg?"flex":"none";
 }
 function cellTap(cell){
-  if(!unlocked) return;
   const day=cell.dataset.day, hall=cell.dataset.hall, start=+cell.dataset.slot;
   if(movingId){
+    if(!unlocked) return;
     const bk=state.bookings.find(b=>b.id===movingId);
     if(bk){ if(!fits(day,hall,start,bk.slots,bk.id)){ toast("Får inte plats där"); return; }
-            bk.day=day; bk.hall=hall; bk.start=start; movingId=null; updateTapHint(); render(); }
+            bk.day=day; bk.hall=hall; bk.start=start; movingId=null; updateFocusHint(); render(); }
     return;
   }
-  if(selectedTeam){
-    const blocked=selectedTeam==="__blocked__";
-    const t=blocked?null:teamById(selectedTeam);
+  if(TOUCH && unlocked && focus.size===1){          // touch: tryck ledig tid för att lägga till markerat lag
+    const id=[...focus][0], blocked=id==="__blocked__";
+    const t=blocked?null:teamById(id);
     const want=blocked?2:((t&&t.len)||4);
     const free=freeAhead(day,hall,start,null);
     if(free<1){ toast("Tiden är upptagen"); return; }
-    state.bookings.push({id:uid(),type:blocked?"blocked":"team",team:blocked?null:selectedTeam,day,hall,start,slots:Math.min(want,free)});
+    state.bookings.push({id:uid(),type:blocked?"blocked":"team",team:blocked?null:id,day,hall,start,slots:Math.min(want,free)});
     render();
   }
 }
@@ -1030,7 +1038,7 @@ function bmLen(delta){
   bk.slots=Math.max(1,Math.min(bk.slots+delta,max));
   render(); renderBookMenu();
 }
-function bmMove(){ movingId=bmBooking; closeBookMenu(); updateTapHint(); }
+function bmMove(){ movingId=bmBooking; closeBookMenu(); updateFocusHint(); }
 function bmDelete(){ state.bookings=state.bookings.filter(b=>b.id!==bmBooking); closeBookMenu(); render(); }
 
 /* ---------- Interaktion: ändra längd ---------- */
