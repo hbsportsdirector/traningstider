@@ -281,11 +281,11 @@
 
   <div class="side">
     <div class="card">
-      <h3>Balans · timmar (Schema / Bör ha)</h3>
+      <h3>Balans · antal pass (Schema / Bör ha)</h3>
       <div id="balance"></div>
       <div class="legend">
         <b>Så funkar det:</b><br>
-        • <b>Allt räknas i timmar:</b> 60 min = 1, 90 min = 1,5, 30 min = 0,5.<br>
+        • <b>Schema = antal pass</b> (oavsett längd). Total tid visas som grå notis under varje grupp.<br>
         • Dra en grupp från listan upptill till en tid.<br>
         • Dra i passets <b>underkant</b> för att förlänga/korta.<br>
         • Dra hela passet för att flytta det.<br>
@@ -405,7 +405,7 @@ function migrate(){
     state.teams=clone(DEFAULT_TEAMS);
     if(state.targets) state.teams.forEach(t=>{ if(state.targets[t.id]!=null) t.target=state.targets[t.id]; });
   }
-  state.teams.forEach(t=>{ if(t.len==null)t.len=4; if(!t.text)t.text=contrastText(t.color||"#888888"); });
+  state.teams.forEach(t=>{ if(t.len==null)t.len=4; if(!t.text)t.text=contrastText(t.color||"#888888"); if(typeof t.target==="number") t.target=Math.round(t.target); });
   delete state.targets;
   if(!state.days) state.days=[...DEFAULT_DAYS];
   if(!state.hallsByDay) state.hallsByDay=clone(DEFAULT_HALLS_BY_DAY);
@@ -549,18 +549,20 @@ function render(){
 // Summan PER GRUPP mätt i TIMMAR (60 min = 1, 90 min = 1,5, 30 min = 0,5)
 function teamHours(){ const m={}; state.teams.forEach(t=>m[t.id]=0);
   state.bookings.forEach(b=>{ if(b.type==="team"&&m[b.team]!=null) m[b.team]+=b.slots*SLOT_MIN/60; }); return m; }
+function passCounts(){ const m={}; state.teams.forEach(t=>m[t.id]=0);   // ANTAL pass per grupp (hela tal)
+  state.bookings.forEach(b=>{ if(b.type==="team"&&m[b.team]!=null) m[b.team]++; }); return m; }
 function statusOf(sched,tgt){ return sched===tgt?"ok":(sched<tgt?"under":"over"); }
 function num(n){ return (Math.round(n*100)/100).toString().replace(".",","); }   // 1.5 -> "1,5"
 
 function renderPalette(){
-  const c=teamHours(), el=document.getElementById("palette");
+  const c=passCounts(), el=document.getElementById("palette");
   let h='<span class="ptitle">Dra eller tryck på en grupp ▸</span>';
   state.teams.forEach(t=>{
     const st=statusOf(c[t.id],t.target);
     h+=`<div class="chip ${selectedTeam===t.id?'sel':''}" draggable="true" ondragstart="dragNew(event,'${t.id}')" onclick="selectTeam('${t.id}')">
           <span class="sw" style="background:${t.color}"></span>
           <span class="nm">${esc(t.name)}</span>
-          <span class="cnt ${st}">${num(c[t.id])}/${num(t.target)}</span>
+          <span class="cnt ${st}">${c[t.id]}/${t.target}</span>
         </div>`;
   });
   h+=`<div class="chip blocked ${selectedTeam==='__blocked__'?'sel':''}" draggable="true" ondragstart="dragNew(event,'__blocked__')" onclick="selectTeam('__blocked__')">
@@ -620,14 +622,14 @@ function renderDays(){
 }
 
 function renderBalance(){
-  const c=teamHours(); let h="";
+  const c=passCounts(), hrs=teamHours(); let h="";
   state.teams.forEach((t,i)=>{
     const sched=c[t.id], diff=t.target-sched, st=statusOf(sched,t.target);
-    const dtxt=diff===0?"✓":(diff>0?"−"+num(diff):"+"+num(-diff));
+    const dtxt=diff===0?"✓":(diff>0?"−"+diff:"+"+(-diff));
     h+=`<div class="balrow">
           <span class="sw" style="background:${t.color}"></span>
-          <span class="nm">${esc(t.name)}</span>
-          <span class="sched">${num(sched)}&nbsp;/&nbsp;${unlocked?`<input class="tgt" type="number" min="0" step="0.25" value="${t.target}" onchange="setTeamTarget(${i},this.value)">`:num(t.target)}</span>
+          <span class="nm">${esc(t.name)}${sched>0?`<small style="display:block;color:var(--muted);font-weight:400;font-size:11px">${num(hrs[t.id])} h totalt</small>`:''}</span>
+          <span class="sched">${sched}&nbsp;/&nbsp;${unlocked?`<input class="tgt" type="number" min="0" step="1" value="${t.target}" onchange="setTeamTarget(${i},this.value)">`:t.target}</span>
           <span class="diff ${st}">${dtxt}</span>
         </div>`;
   });
@@ -635,7 +637,7 @@ function renderBalance(){
 }
 
 function renderSummary(){
-  const c=teamHours(); const team=state.bookings.filter(b=>b.type==="team");
+  const c=passCounts(); const team=state.bookings.filter(b=>b.type==="team");
   const total=team.length;
   const totalH=team.reduce((s,b)=>s+b.slots*SLOT_MIN/60,0);
   const balanced=state.teams.filter(t=>c[t.id]===t.target).length;
@@ -676,7 +678,7 @@ function renderTeamView(){
     const sess=state.bookings.filter(b=>b.type==="team" && b.team===t.id).map(b=>{
       const s=dayStart(b.day)+b.start*SLOT_MIN; return {day:b.day,di:dayIdx(b.day),s,e:s+b.slots*SLOT_MIN,hall:b.hall};
     }).sort((x,y)=> x.di-y.di || x.s-y.s);
-    h+=`<div class="teamcard"><h3 style="background:${t.color};color:${t.text}">${esc(t.name)} <span style="font-weight:400;opacity:.85;font-size:12px">· ${num(hrs[t.id])} / ${num(t.target)} h</span></h3>`;
+    h+=`<div class="teamcard"><h3 style="background:${t.color};color:${t.text}">${esc(t.name)} <span style="font-weight:400;opacity:.85;font-size:12px">· ${sess.length} pass · ${num(hrs[t.id])} h</span></h3>`;
     if(!sess.length) h+='<div class="teamempty">Inga pass inlagda.</div>';
     else {
       h+='<table class="teamtbl"><thead><tr><th>Dag</th><th>Tid</th><th>Hall</th></tr></thead><tbody>';
@@ -779,10 +781,10 @@ function renderSettings(){
 }
 
 function groupsTabHTML(){
-  const c=teamHours();
+  const c=passCounts();
   let h='<p class="hint">Lägg till, döp om, färglägg och sätt mål (Bör ha) per grupp. Passlängd används som standard när du drar ut gruppen på schemat.</p>';
   h+='<div class="mscroll"><table class="hallmatrix"><thead><tr>'
-    +'<th>Färg</th><th>Grupp</th><th>Bör ha (h)</th><th>Inlagda (h)</th><th>Passlängd</th><th></th></tr></thead><tbody>';
+    +'<th>Färg</th><th>Grupp</th><th>Bör ha (pass)</th><th>Inlagda</th><th>Passlängd</th><th></th></tr></thead><tbody>';
   if(state.teams.length===0) h+='<tr><td colspan="6" class="hint">Inga grupper än – lägg till en nedan.</td></tr>';
   state.teams.forEach((t,i)=>{
     const mins=t.len*SLOT_MIN;
@@ -790,8 +792,8 @@ function groupsTabHTML(){
     h+=`<tr>
       <td style="text-align:center"><input type="color" value="${t.color}" onchange="setTeamColor(${i},this.value)"></td>
       <td><input class="hallname" value="${esc(t.name)}" onchange="renameTeam(${i},this.value)"></td>
-      <td style="text-align:center"><input class="num" type="number" min="0" step="0.25" value="${t.target}" onchange="setTeamTarget(${i},this.value)"></td>
-      <td style="text-align:center;color:var(--muted)">${num(c[t.id])}</td>
+      <td style="text-align:center"><input class="num" type="number" min="0" step="1" value="${t.target}" onchange="setTeamTarget(${i},this.value)"></td>
+      <td style="text-align:center;color:var(--muted)">${c[t.id]}</td>
       <td style="text-align:center"><select onchange="setTeamLen(${i},this.value)">${opts}</select></td>
       <td class="del"><button class="tool danger" onclick="deleteTeam(${i})">🗑</button></td>
     </tr>`;
@@ -859,8 +861,7 @@ function renameTeam(i,val){
   t.name=name; render();
 }
 function setTeamColor(i,val){ state.teams[i].color=val; state.teams[i].text=contrastText(val); render(); }
-function setTeamTarget(i,val){ const x=Math.max(0,parseFloat(String(val).replace(",","."))||0);
-  state.teams[i].target=Math.round(x*4)/4; render(); }   // tillåt kvartstimmar (0,25)
+function setTeamTarget(i,val){ state.teams[i].target=Math.max(0,Math.round(parseFloat(String(val).replace(",","."))||0)); render(); }   // antal pass (heltal)
 function setTeamLen(i,minutes){ state.teams[i].len=Math.max(1,Math.round((parseInt(minutes)||60)/SLOT_MIN)); render(); }
 function deleteTeam(i){
   const t=state.teams[i], n=countBookings(b=>b.team===t.id);
